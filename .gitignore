@@ -1,0 +1,14 @@
+node_modules/
+config.js
+.env
+.env.*
+!.env.example
+sessions/
+bots/
+databases/
+tmp/
+*.log
+src/public/
+src/private/
+coverage/
+*.lockfile
