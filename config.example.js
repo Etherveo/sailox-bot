@@ -14,6 +14,9 @@ global.cooldownMs = 1000
 global.maxMessageAgeSec = 120
 global.hotReloadCore = false
 global.logPrivacy = 'masked' // AGENTS: minimalkan isi chat/nomor pada log secara default
+// Catatan: nilai-nilai di file ini adalah DEFAULT awal. Founder dapat mengubah sebagian
+// kunci saat runtime lewat perintah .config (list/get/set/del); override-nya tersimpan di
+// databases/config.json, diterapkan saat boot, dan langsung berlaku tanpa restart.
 global.database = { dir: 'databases', autosaveSec: 30 }
 global.identity = { mentionForm: 'pn', validate: true, aliasMigration: true, actionFallback: true }
 global.bots = {

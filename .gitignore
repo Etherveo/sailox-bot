@@ -1,5 +1,5 @@
 node_modules/
-config.js
+/config.js
 .env
 .env.*
 !.env.example
@@ -12,3 +12,4 @@ src/public/
 src/private/
 coverage/
 *.lockfile
+sessions-*/
