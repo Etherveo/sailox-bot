@@ -5,18 +5,29 @@
   "type": "module",
   "description": "Bot WhatsApp ESM, LID-first, plugin hot-reload dan jadibot terisolasi",
   "author": "Sailox",
-  "engines": { "node": ">=22.13" },
-  "imports": { "#lib": "./lib/index.js", "#lib/*": "./lib/*" },
-  "scripts": { "start": "node index.js", "test": "node test.js" },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "imports": {
+    "#lib": "./lib/index.js",
+    "#lib/*": "./lib/*"
+  },
+  "scripts": {
+    "start": "node index.js",
+    "test": "node test.js"
+  },
   "dependencies": {
     "@whiskeysockets/baileys": "7.0.0-rc14",
-    "awesome-phonenumber": "^7.8.0",
     "acorn": "^8.19.0",
-    "chalk": "^6.0.1",
+    "awesome-phonenumber": "^7.8.0",
+    "axios": "^1.20.0",
     "cfonts": "^3.3.1",
+    "chalk": "^6.0.1",
+    "cheerio": "^1.2.0",
     "file-type": "^22.1.1",
+    "https-proxy-agent": "^7.0.6",
     "jimp": "^1.6.1",
-    "syntax-error": "^1.4.0",
-    "qrcode": "^1.5.4"
+    "qrcode": "^1.5.4",
+    "syntax-error": "^1.4.0"
   }
 }
