@@ -7,7 +7,7 @@ import { formatSize } from '../../lib/downloader/runJob.js'
 // .uptodrive — port gabungan owner-uptodrive.js + owner-uptodrive2.js
 // legacy: unggah file/folder dari disk lokal bot ke Google Drive.
 // Dipakai untuk file hasil unduhan yang terlalu besar untuk dikirim
-// lewat WhatsApp (>20 MB) — naikkan ke Drive, bagikan link-nya.
+// lewat WhatsApp (>150 MB) — naikkan ke Drive, bagikan link-nya.
 //
 // Target dipilih dari cwd virtual fileOps yang SAMA dengan yang dipakai
 // perintah .ls/.cd owner, jadi alurnya: .cd ke foldernya -> .uptodrive

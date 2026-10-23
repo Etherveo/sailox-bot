@@ -92,7 +92,7 @@ Aturan antrean `.dl`:
 - Info file dikirim prosesor (`lib/downloader/runJob.js`) SEBELUM unduhan
   dimulai — jangan menahan metadata menunggu file selesai.
 - Batas ukuran unduhan 2 GiB (streaming, ditegakkan `streamToFile`);
-  pengiriman ke WA berplafon 20 MB (`conn.sendFile`), file lebih besar
+  pengiriman ke WA berplafon 150 MB (`conn.sendFile`), file lebih besar
   hanya disimpan ke disk dan dilaporkan.
 
 ## Penjaga engine (guardian)

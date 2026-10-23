@@ -65,6 +65,42 @@ test('sapaan mengikuti jam di timezone bot', () => {
   assert.equal(greetingFor(new Date('2026-10-21T09:00:00Z'), 'Asia/Jakarta'), 'Sore, kak') // 16:00 WIB
 })
 
+test('menu all: semua kategori tampil dalam satu pesan', () => {
+  const text = buildMenuText({ ...base, input: 'all' })
+  assert.match(text, /_\*MAIN\*_/)
+  assert.match(text, /_\*OWNER\*_/)
+  assert.match(text, /_\*INFO\*_/)
+  assert.match(text, /• ❳ \.ping/)
+  assert.match(text, /• ❳ \.ls \[path\]/)
+  assert.doesNotMatch(text, /Quick Navigation/)
+})
+
+test('hideOwner: kategori owner hilang dari navigasi, all, dan halaman kategori', () => {
+  const nav = buildMenuText({ ...base, input: '', hideOwner: true })
+  assert.doesNotMatch(nav, /Owner/)
+  assert.match(nav, /Total: 4 perintah/)
+  const all = buildMenuText({ ...base, input: 'all', hideOwner: true })
+  assert.doesNotMatch(all, /_\*OWNER\*_/)
+  assert.match(all, /_\*MAIN\*_/)
+  const ownerPage = buildMenuText({ ...base, input: 'owner', hideOwner: true })
+  assert.match(ownerPage, /Quick Navigation/, 'minta owner saat disembunyikan jatuh ke navigasi tanpa owner')
+})
+
+test('handler menu: non-owner ditolak eksplisit saat meminta menu owner', async () => {
+  global.pluginLoader = { list: () => plugins.map(plugin => ({ plugin })) }
+  try {
+    const m = { name: 'Orang', reply: async () => {} }
+    await assert.rejects(() => menuHandler(m, { args: ['owner'], usedPrefix: '.', isOwner: false }), /khusus owner\/founder/)
+    await assert.rejects(() => menuHandler(m, { args: ['own'], usedPrefix: '.', isOwner: false }), /khusus owner\/founder/)
+    const replies = []
+    await menuHandler({ name: 'Orang', reply: async t => { replies.push(String(t)) } }, { args: ['all'], usedPrefix: '.', isOwner: false })
+    assert.doesNotMatch(replies[0], /_\*OWNER\*_/, 'menu all non-owner tidak memuat kategori owner')
+    assert.match(replies[0], /_\*MAIN\*_/)
+  } finally {
+    delete global.pluginLoader
+  }
+})
+
 test('handler menu memakai registry pluginLoader global', async () => {
   global.pluginLoader = { list: () => plugins.map(plugin => ({ plugin })) }
   try {

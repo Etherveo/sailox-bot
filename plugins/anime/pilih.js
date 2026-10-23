@@ -3,7 +3,7 @@
 // Melanjutkan alur anime (.ongoing / .carianime / .anime) satu langkah
 // berdasarkan nomor pilihan. Di tahap terakhir (provider), unduhan
 // dieksekusi lewat runDownloadJob supaya perilakunya sama dengan
-// downloader lain: info file dikirim dulu, file ≤20 MB dikirim ke WA,
+// downloader lain: info file dikirim dulu, file ≤150 MB dikirim ke WA,
 // yang lebih besar disimpan ke disk dan jalurnya dilaporkan.
 
 import path from 'node:path'

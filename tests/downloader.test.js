@@ -240,7 +240,7 @@ test('unduh: file kecil terunduh lalu terkirim ke WA via sendFile', async t => {
 })
 
 test('unduh: file di atas plafon WA tidak dikirim, jalur disk dilaporkan', async t => {
-  const bigSize = 21 * 1024 * 1024
+  const bigSize = 151 * 1024 * 1024 // di atas plafon WA 150 MB (lib/simple.js maxMedia)
   const fakeEngine = {
     id: 'fakehost',
     match: url => String(url).includes('fakehost.test'),

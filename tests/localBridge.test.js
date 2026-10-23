@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { validateJob, buildSyntheticMessage, summarizeContent, ownerJidOf, createLocalBridge, BRIDGE_MAX_MEDIA_BYTES, BRIDGE_RETENTION_MS } from '../lib/helpers/localBridge.js'
+import { validateJob, buildSyntheticMessage, summarizeContent, ownerJidOf, createLocalBridge, resolveBridgeFile, BRIDGE_MAX_MEDIA_BYTES, BRIDGE_RETENTION_MS } from '../lib/helpers/localBridge.js'
 
 const OWNER = '6282348181097@s.whatsapp.net'
 const sleep = ms => new Promise(r => setTimeout(r, ms))
@@ -21,6 +21,56 @@ test('bridge: validateJob menerima say/cmd dan menolak sisanya', () => {
   assert.throws(() => validateJob({ type: 'eval', text: 'x' }), /say.*cmd/)
   assert.throws(() => validateJob({ type: 'say', text: '  ' }), /wajib diisi/)
   assert.throws(() => validateJob({ type: 'say', text: 'x'.repeat(4001) }), /maksimal/)
+})
+
+test('bridge: validateJob menerima job file dan menolak yang tidak lengkap', () => {
+  assert.deepEqual(validateJob({ type: 'file', path: 'sailox-bot/doc.pdf' }), { type: 'file', path: 'sailox-bot/doc.pdf', caption: '' })
+  assert.deepEqual(validateJob({ type: 'file', path: 'a/b.txt', caption: 'halo' }), { type: 'file', path: 'a/b.txt', caption: 'halo' })
+  assert.throws(() => validateJob({ type: 'file' }), /path wajib/)
+  assert.throws(() => validateJob({ type: 'file', path: '  ' }), /path wajib/)
+  assert.throws(() => validateJob({ type: 'teleport', text: 'x' }), /say.*cmd.*file/)
+})
+
+test('bridge: resolveBridgeFile mengurung file di workspace dan memblokir rahasia', () => {
+  const root = '/home/test/workspace/sailox-bot'
+  assert.equal(resolveBridgeFile(root, 'sailox-bot/src/doc.pdf'), '/home/test/workspace/sailox-bot/src/doc.pdf')
+  assert.equal(resolveBridgeFile(root, '/home/test/workspace/catatan.txt'), '/home/test/workspace/catatan.txt')
+  assert.throws(() => resolveBridgeFile(root, '../di-luar.txt'), /di luar workspace/)
+  assert.throws(() => resolveBridgeFile(root, '/etc/passwd'), /di luar workspace/)
+  assert.throws(() => resolveBridgeFile(root, 'sailox-bot/sessions/creds.json'), /terlarang/)
+  assert.throws(() => resolveBridgeFile(root, 'sailox-bot/gdrive-auth/token.json'), /terlarang/)
+  assert.throws(() => resolveBridgeFile(root, 'sailox-bot/.env'), /terlarang/)
+  assert.throws(() => resolveBridgeFile(root, 'sailox-panel/.panel-token'), /terlarang/)
+  assert.throws(() => resolveBridgeFile(root, 'sailox-bot/kunci.key'), /terlarang/)
+})
+
+test('bridge: job file terkirim lewat sendFile ke owner; file hilang jadi hasil error', async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'bridge-'))
+  const sentFiles = []
+  const conn = {
+    sendMessage: async () => ({}),
+    sendFile: async (jid, source, name, caption) => { sentFiles.push({ jid, source, name, caption }); return { key: { id: 'srv' } } },
+    pipeline: { handler: async () => {} },
+  }
+  const bridge = createLocalBridge({ root, getConn: () => conn, isOpen: () => true, config: { bridge: true, founder: [['6282348181097', '']] }, pollMs: 25 })
+  await bridge.start()
+  try {
+    const docPath = path.join(root, 'dokumen.txt')
+    await fsp.writeFile(docPath, 'isi dokumen')
+    await fsp.writeFile(path.join(bridge.dirs.inboxDir, 'jobFile1.json'), JSON.stringify({ type: 'file', path: docPath, caption: 'nih dok' }))
+    assert.ok(await waitFor(path.join(bridge.dirs.outboxDir, 'jobFile1.json')), 'hasil file muncul')
+    const res = JSON.parse(await fsp.readFile(path.join(bridge.dirs.outboxDir, 'jobFile1.json'), 'utf8'))
+    assert.equal(res.ok, true)
+    assert.equal(res.type, 'file')
+    assert.equal(res.path, docPath)
+    assert.deepEqual(sentFiles, [{ jid: OWNER, source: docPath, name: 'dokumen.txt', caption: 'nih dok' }])
+
+    await fsp.writeFile(path.join(bridge.dirs.inboxDir, 'jobFile2.json'), JSON.stringify({ type: 'file', path: path.join(root, 'tidak-ada.txt') }))
+    assert.ok(await waitFor(path.join(bridge.dirs.outboxDir, 'jobFile2.json')), 'hasil file hilang muncul')
+    const res2 = JSON.parse(await fsp.readFile(path.join(bridge.dirs.outboxDir, 'jobFile2.json'), 'utf8'))
+    assert.equal(res2.ok, false)
+    assert.match(res2.error, /tidak ditemukan/)
+  } finally { bridge.stop(); await fsp.rm(root, { recursive: true, force: true }) }
 })
 
 test('bridge: ownerJidOf hanya dari config founder', () => {
