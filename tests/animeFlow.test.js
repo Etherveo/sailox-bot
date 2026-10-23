@@ -103,6 +103,19 @@ test('flow: search -> episodes -> providers', async () => {
   assert.equal(s2.flow.stage, 'providers')
 })
 
+test('regresi 2026-10-23: tahap search TANPA deps.fetchAnimeDetail tidak boleh melempar "tidak tersedia"', async () => {
+  // Di produksi plugins/anime/pilih.js memanggil advanceFlow TANPA deps —
+  // tahap search dulu melempar 'fetchAnimeDetail tidak tersedia' sebelum
+  // sempat mengambil apa pun, sementara tes unit selalu menyuntikkan stub
+  // sehingga lolos. Sekarang tahap ini memakai fetchAnimeDetail asli dari
+  // catalog; URL lokal tak terjangkau ini membuat panggilan aslinya gagal
+  // dengan error jaringan — yang penting BUKAN error pengkabelan itu.
+  await assert.rejects(
+    advanceFlow({ stage: 'search', items: [{ title: 'X', url: 'http://127.0.0.1:9/anime/0/x' }] }, 1, {}),
+    err => !/fetchAnimeDetail tidak tersedia/.test(err?.message || String(err))
+  )
+})
+
 test('flow: nomor di luar jangkauan ditolak; state kedaluwarsa hilang', async () => {
   await assert.rejects(advanceFlow({ stage: 'ongoing', items: [1] }, 5, deps), /Nomor tidak valid/)
   setFlow('chat|user', { stage: 'ongoing', items: [] })

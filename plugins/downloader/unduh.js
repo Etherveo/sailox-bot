@@ -10,7 +10,7 @@
 // Beda dari legacy (disesuaikan dengan bot ini):
 //  - Pengiriman ke WA adalah fitur BARU di sini (legacy berhenti di disk +
 //    backup Drive). File dikirim lewat conn.sendFile, yang di bot ini
-//    berplafon 20 MB (lib/simple.js) — file lebih besar tetap diunduh ke
+//    berplafon 150 MB (lib/simple.js) — file lebih besar tetap diunduh ke
 //    disk dan jalurnya dilaporkan, tidak dipaksakan ke WA.
 //  - Argumen ke-3 dulu berarti "upload ke Drive (1/0)"; subsistem Drive
 //    tidak ada di bot ini, jadi sekarang berarti "kirim ke WA (1/0)".
@@ -45,7 +45,7 @@ import {
 import { isKdriveWrapperUrl } from '#lib/helpers/kdriveRelay.js'
 import { preResolveKdrive, episodeCandidate } from '#lib/helpers/kdrivePreResolve.js'
 
-const WA_MAX_BYTES = 20 * 1024 * 1024 // plafon conn.sendFile di lib/simple.js
+const WA_MAX_BYTES = 150 * 1024 * 1024 // plafon conn.sendFile di lib/simple.js (maxMedia)
 const MAX_DOWNLOAD_BYTES = DEFAULT_MAX_DOWNLOAD_BYTES
 
 const PROVIDER_LABELS = {

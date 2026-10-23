@@ -590,13 +590,13 @@ let st   = global.db.data.stats[pluginId]
 | Collection (key) | Field dan default |
 |------------------|-------------------|
 | `users` (LID) | `lid`, `jid`, `name`, `registered:false`, `regTime:-1`, `age:-1`, `exp:0`, `level:0`, `limit:global.defaultLimit`, `premium:false`, `premiumTime:0`, `banned:false`, `banReason:''`, `banExpires:0`, `warn:0`, `afk:-1`, `afkReason:''` |
-| `chats` (ID chat) | `isBanned:false`, `welcome:false`, `detect:false`, `delete:false` (antiDelete), `antiLink:false`, `game:false`, `rpg:false`, `nsfw:false`, `sWelcome:''`, `sBye:''`, `sPromote:''`, `sDemote:''`, `sDesc:''`, `sSubject:''`, `sIcon:''`, `sRevoke:''`, `users:{}` (per-chat per-user, mis. `{ warn }`, kunci LID) |
+| `chats` (ID chat) | `isBanned:true`, `welcome:false`, `detect:false`, `delete:false` (antiDelete), `antiLink:false`, `game:false`, `rpg:false`, `nsfw:false`, `sWelcome:''`, `sBye:''`, `sPromote:''`, `sDemote:''`, `sDesc:''`, `sSubject:''`, `sIcon:''`, `sRevoke:''`, `users:{}` (per-chat per-user, mis. `{ warn }`, kunci LID) |
 | `settings` (LID bot) | `self:false`, `autoread:false`, `pconly:false`, `gconly:false`, `jadibot:false`, `prefix:null` |
 | `stickers` (base64 `fileSha256`) | `creator` (LID), `text`, `mentionedJid:[]`, `locked:false`, `at` |
 | `stats` (id plugin) | `total:0`, `success:0`, `fail:0`, `last:0`, `lastSuccess:0` (hitung benar; tidak boleh menghitung ganda) |
 | `subbots` (id sub-bot) | lihat 10.7 |
 
-Catatan: default `chats.isBanned` adalah `false`. Bila pemilik menginginkan mode "chat baru nonaktif sampai diaktifkan", ubah **hanya** di `collections/chats.js`.
+Catatan: default `chats.isBanned` adalah `true` — keputusan pemilik: mode "chat baru nonaktif sampai diaktifkan" (gerbang pipeline mengecualikan owner/founder, jadi mereka tidak pernah terpengaruh). Bila menginginkan mode permisif (chat baru langsung aktif), ubah **hanya** di `collections/chats.js`.
 
 ### 8.5 Persistensi
 
@@ -1415,7 +1415,7 @@ Default di bawah dipilih agar aman dan konsisten. Pemilik dapat mengubahnya; age
 1. **`allowCustomPlugins` = `false`** di sub-bot (konservatif). Fitur `saveplugin` sub-bot dibangun penuh, tetapi aktif setelah pemilik menyetel `true`/`'owner-approval'`.
 2. **Isolasi OS** untuk sub-bot publik (container atau OS user terpisah) sangat dianjurkan tetapi tidak diimplementasikan di baseline (10.10).
 3. ⚠ **Bentuk id untuk aksi grup** (`groupParticipantsUpdate`) dan **bentuk mention**: default PN dengan fallback sekali ke LID; perlu diuji di perangkat asli.
-4. **`chats.isBanned` default `false`.** Bila menginginkan mode "chat baru nonaktif sampai diaktifkan", ubah di `collections/chats.js`.
+4. **`chats.isBanned` default `true`** (keputusan pemilik: chat baru nonaktif sampai diaktifkan; owner/founder tidak terpengaruh). Bila menginginkan mode permisif, ubah di `collections/chats.js`.
 5. **`game`/`nsfw` hanya diperiksa di grup**; **`rpg` wajib grup**; **`admin` tanpa bypass owner.** (Asumsi perilaku; ubah di 9.2 bila tidak sesuai.)
 6. **`before` truthy hanya melewati command plugin itu**, bukan seluruh pipeline (9.3).
 7. **Chat/user banned menghentikan seluruh pipeline** (termasuk hook) untuk non-owner (9.4, G4).
