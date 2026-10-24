@@ -108,3 +108,22 @@ test('perintah .config: list/get/set/del lewat handler', async t => {
   await assert.rejects(configCommand(fakeM(), ctx('set logPrivacy')), /Nilai kosong/)
   await assert.rejects(configCommand(fakeM(), ctx('set apikey rahasia')), /tidak dikenal/)
 })
+
+test('coerce: toggle trigger chat Ryn boolean', () => {
+  assert.equal(coerceConfigValue('rynTriggerReply', 'on'), true)
+  assert.equal(coerceConfigValue('rynTriggerReply', 'off'), false)
+  assert.equal(coerceConfigValue('rynTriggerMention', 'off'), false)
+  assert.throws(() => coerceConfigValue('rynTriggerMention', 'kadang'), /boolean/)
+})
+
+test('coerce: kunci chat Ryn — rynScope/rynUsers enum, rynGroups list JID', () => {
+  assert.equal(coerceConfigValue('rynScope', 'both'), 'both')
+  assert.equal(coerceConfigValue('rynScope', 'group'), 'group')
+  assert.throws(() => coerceConfigValue('rynScope', 'semua'), /salah satu/)
+  assert.equal(coerceConfigValue('rynUsers', 'founder'), 'founder')
+  assert.equal(coerceConfigValue('rynUsers', 'anyone'), 'anyone')
+  assert.throws(() => coerceConfigValue('rynUsers', 'admin'), /salah satu/)
+  assert.deepEqual(coerceConfigValue('rynGroups', '120363111@g.us, 120363222@g.us'), ['120363111@g.us', '120363222@g.us'])
+  assert.deepEqual(coerceConfigValue('rynGroups', ''), [])
+  assert.throws(() => coerceConfigValue('rynGroups', 'bukan-jid'), /JID grup tidak valid/)
+})

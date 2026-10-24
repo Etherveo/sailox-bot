@@ -5,6 +5,9 @@ node_modules/
 !.env.example
 sessions/
 gdrive-auth/
+src/integrations/
+# Aset font biner (impor dari legacy) — snapshot GitHub tidak membawa biner.
+src/font/
 bots/
 databases/
 tmp/

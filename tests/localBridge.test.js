@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { validateJob, buildSyntheticMessage, summarizeContent, ownerJidOf, createLocalBridge, resolveBridgeFile, BRIDGE_MAX_MEDIA_BYTES, BRIDGE_RETENTION_MS } from '../lib/helpers/localBridge.js'
+import { validateJob, buildSyntheticMessage, summarizeContent, ownerJidOf, createLocalBridge, resolveBridgeFile, replyTargetOf, BRIDGE_MAX_MEDIA_BYTES, BRIDGE_RETENTION_MS } from '../lib/helpers/localBridge.js'
 
 const OWNER = '6282348181097@s.whatsapp.net'
 const sleep = ms => new Promise(r => setTimeout(r, ms))
@@ -39,6 +39,7 @@ test('bridge: resolveBridgeFile mengurung file di workspace dan memblokir rahasi
   assert.throws(() => resolveBridgeFile(root, '/etc/passwd'), /di luar workspace/)
   assert.throws(() => resolveBridgeFile(root, 'sailox-bot/sessions/creds.json'), /terlarang/)
   assert.throws(() => resolveBridgeFile(root, 'sailox-bot/gdrive-auth/token.json'), /terlarang/)
+  assert.throws(() => resolveBridgeFile(root, 'sailox-bot/src/integrations/gdrive-auth/token.json'), /terlarang/)
   assert.throws(() => resolveBridgeFile(root, 'sailox-bot/.env'), /terlarang/)
   assert.throws(() => resolveBridgeFile(root, 'sailox-panel/.panel-token'), /terlarang/)
   assert.throws(() => resolveBridgeFile(root, 'sailox-bot/kunci.key'), /terlarang/)
@@ -205,4 +206,53 @@ test('bridge: saklar mati = job tidak disentuh; job rusak = hasil error', async 
     assert.equal(bad.ok, false)
     assert.ok(bad.error)
   } finally { on.stop(); await fsp.rm(root, { recursive: true, force: true }) }
+})
+
+test('bridge: validateJob reply — ref wajib id entri, target dari job diabaikan', () => {
+  assert.deepEqual(validateJob({ type: 'reply', ref: '1792-abc123', text: 'halo grup' }), { type: 'reply', ref: '1792-abc123', text: 'halo grup' })
+  assert.throws(() => validateJob({ type: 'reply', text: 'x' }), /ref/)
+  assert.throws(() => validateJob({ type: 'reply', ref: '../kabur', text: 'x' }), /ref/)
+  assert.throws(() => validateJob({ type: 'reply', ref: 'ok', text: '  ' }), /text/)
+})
+
+test('bridge: replyTargetOf hanya menerima chat sah dari catatan bot & menolak yang kedaluwarsa', () => {
+  const now = Date.parse('2026-10-24T00:00:00Z')
+  assert.equal(replyTargetOf({ chat: '120363xxx@g.us', ts: '2026-10-23T23:59:00Z' }, now), '120363xxx@g.us')
+  assert.equal(replyTargetOf({ chat: '6281@s.whatsapp.net', ts: '2026-10-23T23:59:00Z' }, now), '6281@s.whatsapp.net')
+  assert.throws(() => replyTargetOf(null, now), /tidak ditemukan/)
+  assert.throws(() => replyTargetOf({ ts: '2026-10-23T23:59:00Z' }, now), /chat/)
+  assert.throws(() => replyTargetOf({ chat: 'bukan-jid', ts: '2026-10-23T23:59:00Z' }, now), /chat/)
+  assert.throws(() => replyTargetOf({ chat: '120363xxx@g.us', ts: '2026-10-22T00:00:00Z' }, now), /kedaluwarsa/)
+})
+
+test('bridge: job reply terkirim ke chat asal entri to-ryn (grup), bukan ke owner, sambil meng-quote pesan pemicu', async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'bridge-'))
+  const sent = []
+  const conn = { sendMessage: async (jid, content, options) => { sent.push({ jid, content, options }); return { key: { id: 'srv' } } }, pipeline: { handler: async () => {} } }
+  const bridge = createLocalBridge({ root, getConn: () => conn, isOpen: () => true, config: { bridge: true, founder: [['6282348181097', '1234567890']] }, pollMs: 25 })
+  await bridge.start()
+  try {
+    const queueDir = path.join(root, 'src', 'private', 'bridge', 'to-ryn')
+    await fsp.mkdir(queueDir, { recursive: true })
+    await fsp.writeFile(path.join(queueDir, '1792001-abc.json'), JSON.stringify({ id: '1792001-abc', ts: new Date().toISOString(), type: 'message', mode: 'once', text: 'halo ryn', origText: 'Ryn, halo ryn', msgId: 'MSGID1', chat: '120363111@g.us', from: '628999@s.whatsapp.net' }))
+    await fsp.writeFile(path.join(bridge.dirs.inboxDir, 'jobReply1.json'), JSON.stringify({ type: 'reply', ref: '1792001-abc', text: 'halo juga!', target: '628777@s.whatsapp.net' }))
+    assert.ok(await waitFor(path.join(bridge.dirs.outboxDir, 'jobReply1.json')), 'hasil reply muncul')
+    const result = JSON.parse(await fsp.readFile(path.join(bridge.dirs.outboxDir, 'jobReply1.json'), 'utf8'))
+    assert.equal(result.ok, true)
+    assert.equal(result.chat, '120363111@g.us')
+    assert.equal(sent.length, 1)
+    assert.equal(sent[0].jid, '120363111@g.us', 'tujuan dari catatan bot; field target di job diabaikan')
+    assert.equal(sent[0].content.text, 'halo juga!')
+    assert.equal(sent[0].options.quoted.key.id, 'MSGID1', 'balasan meng-quote pesan pemicu')
+    assert.equal(sent[0].options.quoted.key.remoteJid, '120363111@g.us')
+    assert.equal(sent[0].options.quoted.key.participant, '628999@s.whatsapp.net', 'participant terisi untuk grup')
+    assert.equal(sent[0].options.quoted.message.conversation, 'Ryn, halo ryn', 'snapshot quote memakai teks asli pesan')
+
+    await fsp.writeFile(path.join(bridge.dirs.inboxDir, 'jobReply2.json'), JSON.stringify({ type: 'reply', ref: 'tidak-ada', text: 'halo' }))
+    assert.ok(await waitFor(path.join(bridge.dirs.outboxDir, 'jobReply2.json')), 'hasil reply gagal muncul')
+    const gagal = JSON.parse(await fsp.readFile(path.join(bridge.dirs.outboxDir, 'jobReply2.json'), 'utf8'))
+    assert.equal(gagal.ok, false)
+    assert.match(gagal.error, /tidak ditemukan/)
+    assert.equal(sent.length, 1, 'tidak ada kiriman tambahan untuk ref tak dikenal')
+  } finally { bridge.stop(); await fsp.rm(root, { recursive: true, force: true }) }
 })
