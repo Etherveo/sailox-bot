@@ -80,8 +80,9 @@ plugin permukaan (lapisan 3):
 
 | Permukaan | Sifat | Antrean | File di disk |
 |---|---|---|---|
-| `.unduh` / `.u` | Founder, langsung, format `url \| nama custom \| kirimWA 1/0 [-c]` | Tidak | Disimpan di `src/<provider>/`, dihapus hanya dengan `-c` |
+| `.unduh` / `.u` | Founder, langsung, format `url \| nama custom \| kirimWA 1/0 [-c]` | Tidak | Disimpan di `src/downloads/<provider>/`, dihapus hanya dengan `-c` |
 | `.download` / `.dl` | Publik | **Ya** — file JSON `src/download-queue.json`, maks 2 berjalan, 1 per pengguna aktif, 3 menunggu per pengguna | Dihapus setelah berhasil terkirim ke WA; dipertahankan (dijaporkan jalurnya) bila gagal/terlalu besar |
+| `.tiktok` / `.tt` | Publik, interaktif (lihat bawah) | **Ya, klaim manual** — memakai file antrean yang sama, tapi tidak diproses pump `.dl` | Sementara di `src/downloads/tiktok/tt-*`, dihapus setelah terkirim (unduh dulu, baru kirim — lihat bawah) |
 
 Aturan antrean `.dl`:
 
@@ -94,6 +95,52 @@ Aturan antrean `.dl`:
 - Batas ukuran unduhan 2 GiB (streaming, ditegakkan `streamToFile`);
   pengiriman ke WA berplafon 150 MB (`conn.sendFile`), file lebih besar
   hanya disimpan ke disk dan dilaporkan.
+- Job yang selesai (done/failed) atau dibatalkan langsung DIHAPUS dari
+  file antrean; yang tersimpan hanya job pending/active plus `seq`.
+- Link yang sama tidak boleh diproses dua kali: masih mengantri -> ditolak
+  ("sudah ada di antrean #N"); baru keluar dari antrean -> cooldown 1 menit
+  sebelum boleh diproses lagi (perbandingan URL persis setelah normalisasi
+  `new URL().href`).
+- Folder hasil unduhan semua provider ada di `src/downloads/<provider>/`
+  (gitignored); folder dipastikan ada lewat helper `lib/helpers/ensureDir.js`.
+- Provider Facebook/Instagram/TikTok memakai mode respons senyaman mungkin
+  (`QUIET_PROVIDERS` di `runJob.js`): respons pertama selalu react ⏳ di
+  pesan peminta; antrean solo -> tidak ada pesan teks sama sekali; antrean
+  > 1 -> satu pesan posisi antrean yang dihapus setelah media terkirim;
+  setelah terkirim react diganti ✅ (gagal -> ❌ + pesan gagal singkat).
+
+## `.tt` interaktif dan klaim manual antrean
+
+`.tiktok` / `.tt` (`plugins/downloader/tiktok.js`) adalah permukaan
+interaktif TikTok adaptasi handler legacy: kirim video SD, lalu pengguna
+mengirim teks `hd` (video HD) atau `mp3` (audio) dalam 40 detik — disimpan di
+`lib/helpers/tiktokFollowup.js` (kunci chat:sender; kedaluwarsa malas,
+tanpa timer). Sengaja teks biasa TANPA reply: prompt lama menyuruh
+'balas', padahal reply ke pesan bot memicu trigger Ryn (bentrok) — sesi
+follow-up-lah yang berlaku, bukan reply-nya. Plugin ini HANYA gerbang awal
++ interaksi: resolusi memakai engine TikTok yang sama dengan `.dl`, tanpa
+resolver duplikat.
+
+Supaya `.tt` dan `.dl` tidak bisa spam link yang sama bersamaan, `.tt`
+menitipkan **klaim manual** ke file antrean yang sama (`manual: true` di
+`lib/downloader/queue.js`): dedupe link, batas per pengguna, dan cooldown
+60 detik berlaku penuh untuk kedua arah — tapi pump `.dl` melewati klaim
+manual (tidak diproses ganda); `.tt` memprosesnya sendiri lalu `finish()`.
+Klaim yang tidak di-finish (proses mati) kedaluwarsa 10 menit
+(`MANUAL_CLAIM_TTL_MS`) agar tidak memblokir link selamanya.
+
+Media `.tt` TIDAK dikirim langsung dari URL resolver (perbaikan
+2026-10-24): `sendFile` dari URL lewat `fetchPublicBuffer`, yang
+memvalidasi DNS — di sel VM ini resolver egress memetakan semua host
+publik ke 198.18/15, sehingga validasi itu menolak media `.tt` sebagai
+"jaringan privat" untuk semua link, sementara `.dl` jalan karena
+mengunduh ke disk dulu. `.tt` kini mengunduh dulu lewat
+`engine.download` (fetch biasa, streaming, plafon 150 MB) ke
+`src/downloads/tiktok/tt-*`, mengirim dari file lokal, lalu menghapus
+folder tmp-nya — berlaku juga untuk follow-up `hd`/`mp3`. Validasi
+`net.js` sengaja TIDAK dilemahkan untuk menutupi ini. Kegagalan `.tt`
+kini dilog mentah di terminal dan dilaporkan guardian ke DM founder
+(fase `send`), bukan hanya pesan generik dispatcher.
 
 ## Penjaga engine (guardian)
 
@@ -117,14 +164,18 @@ penting: kerusakan ketahuan dari laporan owner, bukan dari keluhan
 pengguna. Bila sebuah resolver mati permanen, perbaiki/ganti resolver di
 dalam engine yang sama; kontraknya tidak berubah.
 
-Catatan resolver per platform (keadaan 2026-10-21):
-- tiktok/facebook/instagram berbagi SATU resolver bersama,
+Catatan resolver per platform:
+- **tiktok** (keadaan 2026-10-24, menggantikan instatiktok): adaptasi
+  legacy `downloader-tiktok.js` — savetik dulu, fallback tikwm, video
+  utama SD dulu (HD hanya bila SD tak ada), foto didahulukan atas video.
+  TIDAK ADA HEAD check media: HEAD dari VM terbukti 503/timeout pada URL
+  yang hidup (itu yang membunuh probe 0/5), sementara legacy yang langsung
+  sendFile jalan normal. Permukaan interaktifnya `.tt` (bawah); `.dl`
+  memakai engine yang sama persis supaya selaras.
+- facebook/instagram berbagi SATU resolver bersama,
   `lib/downloader/instatiktok.js` (layanan instatiktok.com, dari legacy
-  `downloader-download.js` — versi yang pemilik nyatakan bekerja; engine
-  per-platform sebelumnya memakai tikwm/savetik, fbdownloader, dan
-  downloadgram yang error di lapangan). Pemilihan tautan mengikuti
-  legacy: tiktok = tautan ber-`hdplay` else pertama; facebook = tautan
-  terakhir; instagram = semua tautan (multi-file -> list).
+  `downloader-download.js`). Pemilihan tautan mengikuti legacy: facebook
+  = tautan terakhir; instagram = semua tautan (multi-file -> list).
 - pinterest memakai steptodown; twitter memakai vxtwitter dengan API
   legacy sebagai cadangan.
 

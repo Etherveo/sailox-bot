@@ -10,6 +10,15 @@ import {
   providerLabel,
   attachEngineNotifierWithConn
 } from '#lib/downloader/index.js'
+import { reactTo, REACT } from '#lib/helpers/react.js'
+
+// Provider sosial yang responsnya dibuat senyaman mungkin (permintaan
+// pemilik 2026-10-24): respons pertama selalu react ⏳ di pesan peminta;
+// bila antrean cuma satu (tidak ada antrean lain), TIDAK ada pesan teks
+// sama sekali selain react itu; bila antrean > 1, dikirim satu pesan
+// posisi antrean yang dihapus prosesor setelah media terkirim, lalu react
+// diganti ✅ (lihat lib/downloader/runJob.js: QUIET_PROVIDERS).
+const QUIET_PROVIDERS = new Set(['facebook', 'instagram', 'tiktok'])
 
 // .download / .dl — permukaan PUBLIK untuk downloader (pasangan .unduh yang
 // khusus founder & langsung). Semua platform adalah ENGINE di
@@ -64,7 +73,21 @@ let handler = async (m, ctx) => {
   const rootDir = projectRoot()
   const queue = ctx.downloadQueue ?? getDownloadQueue(rootDir)
   // Pasang/segarkan prosesor antrean dengan conn & registry terbaru.
-  attachDownloadProcessor(job => runDownloadJob({ conn: activeConn, job, registry, rootDir }))
+  // Bidang job yang berubah setelah enqueue (khususnya kunci pesan posisi
+  // antrean) dibaca ulang dari file antrean sesaat sebelum diproses, agar
+  // prosesor tidak memegang salinan job yang kedaluwarsa.
+  attachDownloadProcessor(async job => {
+    let fresh = job
+    try {
+      const snap = await queue.snapshot()
+      const found = snap.jobs.find(j => j.id === job.id)
+      if (found) fresh = { ...job, userMsgKey: found.userMsgKey ?? job.userMsgKey, queueNoticeKey: found.queueNoticeKey ?? job.queueNoticeKey }
+    } catch { /* pakai salinan job apa adanya */ }
+    const getJobState = async id => {
+      try { return (await queue.snapshot()).jobs.find(j => j.id === id) ?? null } catch { return null }
+    }
+    return runDownloadJob({ conn: activeConn, job: fresh, registry, rootDir, getJobState })
+  })
 
   const providersText = () => supportedProviders().map(providerLabel).join(', ') || '(belum ada engine aktif)'
   const raw = (text ?? '').trim()
@@ -105,13 +128,26 @@ let handler = async (m, ctx) => {
     throw `❌ Domain link ini belum didukung.\nProvider yang didukung: ${providersText()}`
   }
 
-  const { job, position } = await queue.enqueue({
+  const { job, position, liveCount } = await queue.enqueue({
     url,
     provider: providerId,
     chat: m.chat,
     sender: m.sender,
     senderName: m.pushName || m.name || '',
+    userMsgKey: m.key ?? null,
   })
+
+  // Provider sosial: respons pertama = react ⏳. Antrean > 1 -> kirim satu
+  // pesan posisi (dihapus prosesor setelah selesai). Antrean solo -> tidak
+  // ada pesan teks sama sekali.
+  if (QUIET_PROVIDERS.has(providerId)) {
+    await reactTo(m, REACT.processing).catch(() => {})
+    if (liveCount > 1) {
+      const notice = await conn.sendMessage(m.chat, { text: `📍 Posisi antrean: ${position}` })
+      if (notice?.key && queue.updateNotice) await queue.updateNotice(job.id, notice.key).catch(() => {})
+    }
+    return
+  }
 
   return m.reply(
     `📥 *Masuk antrean #${job.id}*\n` +

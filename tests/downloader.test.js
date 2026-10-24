@@ -236,7 +236,7 @@ test('unduh: file kecil terunduh lalu terkirim ke WA via sendFile', async t => {
   assert.match(conn.sent[0], /Informasi File/)
   assert.equal(conn.files.length, 1)
   assert.equal(conn.files[0].fileName, 'contoh.mp4')
-  assert.ok(conn.files[0].filePath.startsWith(path.join(root, 'src', 'fakehost')))
+  assert.ok(conn.files[0].filePath.startsWith(path.join(root, 'src', 'downloads', 'fakehost')))
 })
 
 test('unduh: file di atas plafon WA tidak dikirim, jalur disk dilaporkan', async t => {

@@ -52,8 +52,8 @@ test('antrean: state hidup di file JSON, job selesai berurutan per pengguna', as
   await queue.enqueue({ url: 'https://x/3', provider: 'pixeldrain', chat: 'c', sender: 'B' })
   await waitFor(async () => (await queue.snapshot()).pending === 0 && (await queue.snapshot()).active === 0)
   const saved = JSON.parse(await fs.readFile(file, 'utf8'))
-  assert.equal(saved.jobs.length, 3)
-  assert.ok(saved.jobs.every(j => j.status === 'done'), 'semua job selesai & tercatat di file')
+  assert.equal(saved.jobs.length, 0, 'job selesai langsung dibersihkan dari file antrean')
+  assert.equal(saved.seq, 3, 'nomor urut tetap naik walau entri dibersihkan')
   assert.ok(order.indexOf('start:2') > order.indexOf('end:1'), 'job pengguna yang sama tidak berjalan tumpang tindih / mendahului')
   assert.ok(order.indexOf('start:3') < order.indexOf('end:2'), 'pengguna lain boleh menyalip job yang masih menunggu giliran per-penggunanya')
 })
@@ -75,7 +75,7 @@ test('antrean: job active yatim dipulihkan saat antrean berjalan lagi (resume)',
   let processed = 0
   const queue = createDownloadQueue({ file, processJob: async () => { processed++; return {} } })
   queue.kick()
-  await waitFor(async () => (await queue.snapshot()).jobs[0]?.status === 'done')
+  await waitFor(async () => (await queue.snapshot()).jobs.length === 0 && processed === 1)
   assert.equal(processed, 1)
 })
 
@@ -89,7 +89,7 @@ test('antrean: NO_CONN mengembalikan job ke pending tanpa gagal, kick memproses 
   await queue.enqueue({ url: 'u', provider: 'p', chat: 'c', sender: 'A' })
   await waitFor(async () => (await queue.snapshot()).jobs[0]?.status === 'pending' && attempts === 1)
   queue.kick()
-  await waitFor(async () => (await queue.snapshot()).jobs[0]?.status === 'done')
+  await waitFor(async () => (await queue.snapshot()).jobs.length === 0 && attempts === 2)
   assert.equal(attempts, 2)
 })
 
@@ -138,7 +138,7 @@ test('runJob: info terkirim SEBELUM download dimulai, file terkirim, folder job 
   assert.ok(infoIdx > -1 && dlIdx > -1 && infoIdx < dlIdx, 'info harus mendahului unduhan')
   assert.ok(fileIdx > dlIdx, 'pengiriman setelah unduhan')
   assert.match(events[infoIdx].text, /audio\/mpeg/)
-  const leftovers = await fs.readdir(path.join(dir, 'src', 'pixeldrain'))
+  const leftovers = await fs.readdir(path.join(dir, 'src', 'downloads', 'pixeldrain'))
   assert.deepEqual(leftovers, [], 'folder job dibersihkan setelah file terkirim')
 })
 
@@ -187,7 +187,7 @@ test('.dl teks langsung: link ditemukan di tengah kalimat, job diproses sampai f
   const f = dlFixture(t, dir)
   await downloadHandler(f.m, f.ctx('ambilin dong https://pixeldrain.com/u/abc123 makasih'))
   assert.match(f.replies.at(-1), /Masuk antrean #1/)
-  await waitFor(async () => (await f.queue.snapshot()).jobs[0]?.status === 'done')
+  await waitFor(async () => (await f.queue.snapshot()).jobs.length === 0)
   assert.ok(f.events.some(e => e.type === 'msg' && /Informasi File/.test(e.text)))
   assert.ok(f.events.some(e => e.type === 'file'))
 })
@@ -198,8 +198,9 @@ test('.dl balas pesan: link diambil dari teks pesan yang dibalas', async t => {
   f.m.quoted = { text: 'nih file-nya https://pixeldrain.com/u/xyz789 ya' }
   await downloadHandler(f.m, f.ctx(''))
   assert.match(f.replies.at(-1), /Masuk antrean #1/)
-  await waitFor(async () => (await f.queue.snapshot()).jobs[0]?.status === 'done')
-  assert.equal((await f.queue.snapshot()).jobs[0].url, 'https://pixeldrain.com/u/xyz789')
+  assert.match(f.replies.at(-1), /xyz789/, 'link dari pesan yang dibalas masuk ke antrean')
+  await waitFor(async () => (await f.queue.snapshot()).jobs.length === 0)
+  assert.ok(f.events.some(e => e.type === 'file'), 'job dari link balasan tetap diproses sampai terkirim')
 })
 
 test('.dl tanpa link & domain tak didukung: ditolak dengan petunjuk', async t => {
@@ -220,7 +221,7 @@ test('.dl antrean & batal: sub-perintah mengelola antrean sendiri', async t => {
   assert.match(f.replies.at(-1), /#1 — Pixeldrain/)
   await downloadHandler(f.m, ctx2('batal 1'))
   assert.match(f.replies.at(-1), /dibatalkan/)
-  assert.equal((await blocked.snapshot()).jobs[0].status, 'cancelled')
+  assert.equal((await blocked.snapshot()).jobs.length, 0, 'job batal langsung keluar dari antrean')
 })
 
 // ─── Engine baru ─────────────────────────────────────────────────────────────
@@ -320,4 +321,198 @@ test('krakenfiles: scrape mengambil <source> video & judul bersih', async () => 
   assert.equal(info.fileName, 'Video Keren.mp4')
   assert.equal(info.size, 999)
   assert.equal(krakenfiles.match('https://krakenfiles.com/view/xx/file.html'), true)
+})
+
+// ─── runJob: sniff byte, konversi webp, batch media (album) ─────────────────
+
+const MP4_BYTES = Buffer.concat([Buffer.from([0, 0, 0, 24]), Buffer.from('ftypisom'), Buffer.from([0, 0, 0, 0]), Buffer.from('isomiso2'), Buffer.alloc(64, 7)])
+const JPG_BYTES = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 16]), Buffer.from('JFIF\0'), Buffer.alloc(64, 3)])
+const WEBP_BYTES = Buffer.concat([Buffer.from('RIFF'), Buffer.from([80, 0, 0, 0]), Buffer.from('WEBPVP8 '), Buffer.alloc(64, 5)])
+
+function capturingConn(events, { albumKey = { id: 'ALBUM1', remoteJid: 'c' }, failAlbum = false } = {}) {
+  return {
+    sendMessage: async (chat, content) => {
+      if (content.album) {
+        events.push({ type: 'album', album: content.album })
+        if (failAlbum) throw new Error('album tidak didukung')
+        return { key: albumKey }
+      }
+      events.push({ type: 'msg', text: content.text })
+      return { key: { id: 'M' + events.length } }
+    },
+    sendFile: async (chat, source, filename, caption, quoted, ptt, options) => { events.push({ type: 'file', filename, options }) },
+  }
+}
+
+test('runJob: nama .bin dari CDN dibetulkan dari magic bytes sebelum dikirim', async t => {
+  const dir = await tmpDir(t)
+  const events = []
+  const engine = {
+    async getInfo() { return { fileName: 'instagram-1', size: null, mimetype: null, downloadUrl: 'https://cdn/x' } },
+    async download(url, info, { destDir, baseName }) {
+      const filePath = path.join(destDir, baseName + '.bin')
+      await fs.writeFile(filePath, MP4_BYTES)
+      return { filePath, fileName: 'instagram-1.bin', mimetype: 'application/octet-stream', size: MP4_BYTES.length }
+    },
+  }
+  const result = await runDownloadJob({ conn: capturingConn(events), job: { id: 3, url: 'u', provider: 'instagram', chat: 'c', sender: 'A' }, registry: { getEngine: () => engine }, rootDir: dir })
+  assert.equal(result.fileName, 'instagram-1.mp4')
+  assert.equal(events.find(e => e.type === 'file').filename, 'instagram-1.mp4')
+})
+
+test('runJob: batch media — semua item diunduh lalu dikirim sebagai album', async t => {
+  const dir = await tmpDir(t)
+  const events = []
+  const mediaItems = [
+    { fileName: 'instagram-1', downloadUrl: 'https://cdn/1' },
+    { fileName: 'instagram-2', downloadUrl: 'https://cdn/2' },
+    { fileName: 'instagram-3', downloadUrl: 'https://cdn/3' },
+  ]
+  const payloads = { 'instagram-1': JPG_BYTES, 'instagram-2': MP4_BYTES, 'instagram-3': JPG_BYTES }
+  const engine = {
+    async getInfo() { return { isList: true, fileName: 'Postingan Instagram', size: null, files: mediaItems.map(i => ({ fileName: i.fileName, size: null })), mediaItems } },
+    async download(url, info, { destDir, baseName }) {
+      const filePath = path.join(destDir, baseName + '.bin')
+      await fs.writeFile(filePath, payloads[baseName])
+      return { filePath, fileName: baseName + '.bin', mimetype: 'application/octet-stream', size: payloads[baseName].length }
+    },
+  }
+  const result = await runDownloadJob({ conn: capturingConn(events), job: { id: 4, url: 'u', provider: 'pixeldrain', chat: 'c', sender: 'A', senderName: 'Tes' }, registry: { getEngine: () => engine }, rootDir: dir })
+  assert.equal(result.kind, 'media-batch')
+  const album = events.find(e => e.type === 'album')
+  assert.ok(album, 'pesan album dikirim')
+  assert.equal(album.album.expectedImageCount, 2)
+  assert.equal(album.album.expectedVideoCount, 1)
+  const files = events.filter(e => e.type === 'file')
+  assert.equal(files.length, 3)
+  assert.ok(files.every(f => f.options?.albumParentKey?.id === 'ALBUM1'), 'semua media terikat ke album yang sama')
+  assert.deepEqual(files.map(f => f.filename).sort(), ['instagram-1.jpg', 'instagram-2.mp4', 'instagram-3.jpg'], 'ekstensi dibetulkan dari byte asli')
+  assert.match(events.filter(e => e.type === 'msg').at(-1).text, /3 dari 3 file terkirim/)
+  assert.deepEqual(await fs.readdir(path.join(dir, 'src', 'downloads', 'pixeldrain')), [], 'folder job dibersihkan')
+})
+
+test('runJob: batch media — album gagal, jatuh ke kirim satu per satu', async t => {
+  const dir = await tmpDir(t)
+  const events = []
+  const mediaItems = [
+    { fileName: 'instagram-1', downloadUrl: 'https://cdn/1' },
+    { fileName: 'instagram-2', downloadUrl: 'https://cdn/2' },
+  ]
+  const engine = {
+    async getInfo() { return { isList: true, fileName: 'Postingan Instagram', size: null, files: mediaItems.map(i => ({ fileName: i.fileName, size: null })), mediaItems } },
+    async download(url, info, { destDir, baseName }) {
+      const filePath = path.join(destDir, baseName + '.bin')
+      await fs.writeFile(filePath, JPG_BYTES)
+      return { filePath, fileName: baseName + '.bin', mimetype: 'application/octet-stream', size: JPG_BYTES.length }
+    },
+  }
+  const result = await runDownloadJob({ conn: capturingConn(events, { failAlbum: true }), job: { id: 5, url: 'u', provider: 'pixeldrain', chat: 'c', sender: 'A' }, registry: { getEngine: () => engine }, rootDir: dir })
+  assert.equal(result.kind, 'media-batch')
+  const files = events.filter(e => e.type === 'file')
+  assert.equal(files.length, 2)
+  assert.ok(files.every(f => !f.options?.albumParentKey), 'tanpa albumParentKey saat album gagal')
+  assert.match(events.filter(e => e.type === 'msg').at(-1).text, /2 dari 2 file terkirim/)
+})
+
+test('runJob: foto webp dikonversi ke JPEG sebelum dikirim (anti jadi stiker)', async t => {
+  const { execFile } = await import('node:child_process')
+  const { promisify } = await import('node:util')
+  const execFileAsync = promisify(execFile)
+  const dir = await tmpDir(t)
+  const seed = path.join(dir, 'seed.webp')
+  await execFileAsync('ffmpeg', ['-y', '-f', 'lavfi', '-i', 'color=c=red:s=64x64', '-frames:v', '1', seed])
+  const events = []
+  const engine = {
+    async getInfo() { return { fileName: 'instagram-1', size: null, mimetype: null, downloadUrl: 'https://cdn/x' } },
+    async download(url, info, { destDir, baseName }) {
+      const filePath = path.join(destDir, baseName + '.webp')
+      await fs.copyFile(seed, filePath)
+      const st = await fs.stat(filePath)
+      return { filePath, fileName: 'instagram-1.webp', mimetype: 'image/webp', size: st.size }
+    },
+  }
+  const result = await runDownloadJob({ conn: capturingConn(events), job: { id: 6, url: 'u', provider: 'instagram', chat: 'c', sender: 'A' }, registry: { getEngine: () => engine }, rootDir: dir })
+  assert.equal(result.fileName, 'instagram-1.jpg')
+  assert.equal(events.find(e => e.type === 'file').filename, 'instagram-1.jpg')
+})
+
+// ─── Antrean: dedupe link + cooldown 1 menit ─────────────────────────────────
+
+test('antrean: link yang sama ditolak selagi mengantri, lalu cooldown 1 menit setelah keluar', async t => {
+  const dir = await tmpDir(t)
+  const queue = createDownloadQueue({ file: path.join(dir, 'q.json'), processJob: async () => ({}), maxConcurrent: 0, duplicateCooldownMs: 60_000 })
+  await queue.enqueue({ url: 'https://x/sama', provider: 'instagram', chat: 'c', sender: 'A' })
+  await assert.rejects(queue.enqueue({ url: 'https://x/sama', provider: 'instagram', chat: 'c', sender: 'B' }), /sudah ada di antrean #1/)
+  await queue.cancel(1, 'A')
+  await assert.rejects(queue.enqueue({ url: 'https://x/sama', provider: 'instagram', chat: 'c', sender: 'A' }), /baru saja diproses/)
+  const fast = createDownloadQueue({ file: path.join(dir, 'q2.json'), processJob: async () => ({}), maxConcurrent: 0, duplicateCooldownMs: 30 })
+  await fast.enqueue({ url: 'https://x/cepat', provider: 'instagram', chat: 'c', sender: 'A' })
+  await fast.cancel(1, 'A')
+  await assert.rejects(fast.enqueue({ url: 'https://x/cepat', provider: 'instagram', chat: 'c', sender: 'A' }), /baru saja diproses/)
+  await new Promise(r => setTimeout(r, 40))
+  const ok = await fast.enqueue({ url: 'https://x/cepat', provider: 'instagram', chat: 'c', sender: 'A' })
+  assert.equal(ok.job.id, 2, 'setelah cooldown habis, link yang sama boleh mengantri lagi')
+})
+
+// ─── Provider sosial: respon senyaman mungkin ───────────────────────────────
+
+function quietConn(events) {
+  return {
+    sendMessage: async (chat, content) => {
+      if (content.react) { events.push({ type: 'react', text: content.react.text, key: content.react.key }); return { key: { id: 'R' } } }
+      if (content.delete) { events.push({ type: 'delete', key: content.delete }); return { key: { id: 'D' } } }
+      if (content.album) { events.push({ type: 'album', album: content.album }); return { key: { id: 'ALBUM1' } } }
+      events.push({ type: 'msg', text: content.text })
+      return { key: { id: 'N' + events.length } }
+    },
+    sendFile: async (chat, source, filename, caption, quoted, ptt, options) => { events.push({ type: 'file', filename, options }) },
+  }
+}
+
+test('.dl instagram solo: hanya react ⏳, tanpa pesan teks antrean/info', async t => {
+  const dir = await tmpDir(t)
+  const events = []
+  const conn = quietConn(events)
+  const registry = { detectProvider: () => 'instagram', getEngine: () => ({ async getInfo() { return { fileName: 'instagram-1', size: 1, downloadUrl: 'u' } }, async download(u, info, { destDir, baseName }) { const p = path.join(destDir, baseName + '.jpg'); await fs.writeFile(p, JPG_BYTES); return { filePath: p, fileName: baseName + '.jpg', mimetype: 'image/jpeg', size: JPG_BYTES.length } } }) }
+  const queue = createDownloadQueue({ file: path.join(dir, 'q.json'), processJob: job => runDownloadJob({ conn, job, registry, rootDir: dir }) })
+  const replies = []
+  const m = { chat: 'c', sender: 'A@s.whatsapp.net', pushName: 'Tes', key: { id: 'U1', remoteJid: 'c', fromMe: false }, conn, quoted: null, reply: async teks => { replies.push(String(teks)) } }
+  await downloadHandler(m, { conn, text: 'https://www.instagram.com/p/ABC/', usedPrefix: '.', command: 'dl', downloaderRegistry: registry, downloadQueue: queue })
+  assert.deepEqual(replies, [], 'tidak ada balasan teks untuk antrean solo')
+  assert.ok(events.some(e => e.type === 'react' && e.text === '⏳'), 'react processing di pesan peminta')
+  assert.ok(!events.some(e => e.type === 'msg'), 'belum ada pesan teks apa pun')
+  await waitFor(async () => (await queue.snapshot()).jobs.length === 0)
+  assert.ok(events.some(e => e.type === 'file'), 'media tetap terkirim')
+  assert.ok(events.some(e => e.type === 'react' && e.text === '✅'), 'react diganti centang setelah terkirim')
+  assert.ok(!events.some(e => e.type === 'msg' && /Informasi File|selesai/.test(e.text || '')), 'tidak ada pesan info/ringkasan')
+})
+
+test('.dl instagram antrean > 1: pesan posisi dikirim lalu dihapus setelah selesai', async t => {
+  const dir = await tmpDir(t)
+  const events = []
+  const conn = quietConn(events)
+  const engine = { async getInfo() { return { fileName: 'instagram-1', size: 1, downloadUrl: 'u' } }, async download(u, info, { destDir, baseName }) { const p = path.join(destDir, baseName + '.jpg'); await fs.writeFile(p, JPG_BYTES); return { filePath: p, fileName: baseName + '.jpg', mimetype: 'image/jpeg', size: JPG_BYTES.length } } }
+  const registry = { detectProvider: () => 'instagram', getEngine: () => engine }
+  // Job pertama sengaja digantung agar antrean benar-benar > 1 saat job IG masuk.
+  const queue = createDownloadQueue({ file: path.join(dir, 'q.json'), processJob: job => job.url === 'https://x/dulu' ? new Promise(() => {}) : runDownloadJob({ conn, job, registry, rootDir: dir, getJobState: async id => (await queue.snapshot()).jobs.find(j => j.id === id) ?? null }) })
+  await queue.enqueue({ url: 'https://x/dulu', provider: 'pixeldrain', chat: 'c', sender: 'B' })
+  const replies = []
+  const m = { chat: 'c', sender: 'A@s.whatsapp.net', pushName: 'Tes', key: { id: 'U2', remoteJid: 'c', fromMe: false }, conn, quoted: null, reply: async teks => { replies.push(String(teks)) } }
+  await downloadHandler(m, { conn, text: 'https://www.instagram.com/p/ABC/', usedPrefix: '.', command: 'dl', downloaderRegistry: registry, downloadQueue: queue })
+  const notice = events.find(e => e.type === 'msg' && /Posisi antrean: 2/.test(e.text || ''))
+  assert.ok(notice, 'pesan posisi antrean dikirim karena ada antrean lain')
+  await waitFor(async () => (await queue.snapshot()).jobs.every(j => j.url !== 'https://www.instagram.com/p/ABC/'))
+  assert.ok(events.some(e => e.type === 'delete'), 'pesan posisi dihapus setelah media terkirim')
+  assert.ok(events.some(e => e.type === 'react' && e.text === '✅'))
+})
+
+test('runJob quiet: gagal unduh -> react ❌ + pesan gagal, tanpa info', async t => {
+  const dir = await tmpDir(t)
+  const events = []
+  const engine = { async getInfo() { return { fileName: 'instagram-1', size: 1, downloadUrl: 'u' } }, async download() { throw new Error('CDN menolak') } }
+  await assert.rejects(runDownloadJob({ conn: quietConn(events), job: { id: 9, url: 'u', provider: 'instagram', chat: 'c', sender: 'A', userMsgKey: { id: 'U9', remoteJid: 'c' }, queueNoticeKey: { id: 'N9', remoteJid: 'c' } }, registry: { getEngine: () => engine }, rootDir: dir }), /CDN menolak/)
+  assert.ok(events.some(e => e.type === 'react' && e.text === '❌'), 'react gagal')
+  assert.ok(events.some(e => e.type === 'delete'), 'pesan posisi ikut dihapus saat gagal')
+  assert.ok(events.some(e => e.type === 'msg' && /gagal/.test(e.text || '')))
+  assert.ok(!events.some(e => e.type === 'msg' && /Informasi File/.test(e.text || '')), 'tidak ada pesan info')
 })

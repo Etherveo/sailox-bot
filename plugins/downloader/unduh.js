@@ -43,6 +43,7 @@ import {
   attachEngineNotifierWithConn
 } from '#lib/downloader/index.js'
 import { isKdriveWrapperUrl } from '#lib/helpers/kdriveRelay.js'
+import { ensureDir } from '#lib/helpers/ensureDir.js'
 import { preResolveKdrive, episodeCandidate } from '#lib/helpers/kdrivePreResolve.js'
 
 const WA_MAX_BYTES = 150 * 1024 * 1024 // plafon conn.sendFile di lib/simple.js (maxMedia)
@@ -225,14 +226,14 @@ let handler = async (m, { conn, text, usedPrefix, command }) => {
     )
   }
 
-  // --- Siapkan folder kerja khusus job ini di src/<provider>/ (pola legacy) ---
-  const providerDir = path.join(projectRoot(), 'src', providerId)
-  await fsp.mkdir(providerDir, { recursive: true })
+  // --- Siapkan folder kerja khusus job ini di src/downloads/<provider>/ ---
+  const providerDir = path.join(projectRoot(), 'src', 'downloads', providerId)
+  await ensureDir(providerDir)
 
   const baseSource = nameArg || stripKnownExtension(info.fileName || 'file')
   const safeBaseName = sanitizeFileName(baseSource)
   const jobDir = ensureUniqueDir(path.join(providerDir, safeBaseName))
-  await fsp.mkdir(jobDir, { recursive: true })
+  await ensureDir(jobDir)
   const jobRel = path.relative(projectRoot(), jobDir)
 
   const tooBigForWa = info.size != null && info.size > WA_MAX_BYTES

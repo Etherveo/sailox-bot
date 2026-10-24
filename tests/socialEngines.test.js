@@ -33,16 +33,54 @@ test('instatiktok: tautan btn diekstrak unik berurutan, yang bukan btn diabaikan
   assert.deepEqual(parseInstaTiktokLinks(tanpaBtn), ['https://cdn/a.mp4'])
 })
 
-test('tiktok: tautan hdplay didahulukan (aturan legacy), else pertama', async () => {
-  assert.equal(tiktok.pickTiktokLink(['https://cdn/play.mp4', 'https://cdn/hdplay-9.mp4']), 'https://cdn/hdplay-9.mp4')
-  assert.equal(tiktok.pickTiktokLink(['https://cdn/play.mp4']), 'https://cdn/play.mp4')
-  const html = `<a class="btn" href="https://cdn/play.mp4">SD</a><a class="btn" href="https://cdn/hdplay-730.mp4">HD</a>`
-  const info = await tiktok.getInfo('https://www.tiktok.com/@u/video/730123', { fetchFn: instaFetch(html) })
-  assert.equal(info.downloadUrl, 'https://cdn/hdplay-730.mp4')
-  assert.equal(info.fileName, 'tiktok-730123.mp4')
-  assert.equal(info.size, 555)
+test('tiktok: adaptasi legacy downloader-tiktok.js — savetik dulu, tikwm fallback, SD dulu, foto jadi list, TANPA HEAD', async () => {
   assert.equal(tiktok.match('https://vt.tiktok.com/abc/'), true)
   assert.equal(tiktok.match('https://tiktok.com.evil.test/@u/video/1'), false)
+  // Stub fetch yang mencatat method: getInfo TIDAK BOLEH melakukan HEAD
+  // (HEAD dari VM terbukti 503/timeout pada URL yang hidup — itu yang
+  // membunuh probe 0/5; legacy tidak pernah HEAD media).
+  const methods = []
+  const savetikHtml = '<h3>Judul Tes</h3><div class="dl-action">' +
+    '<a href="https://cdn.test/hd.mp4">Download MP4 HD</a>' +
+    '<a href="https://cdn.test/sd2.mp4">Download MP4 [2]</a>' +
+    '<a href="https://cdn.test/sd1.mp4">Download MP4 [1]</a></div>'
+  const fetchFn = async (url, opts = {}) => {
+    methods.push(opts.method || 'GET')
+    const u = String(url)
+    if (u.includes('savetik.io/api')) return Response.json({ status: 'ok', data: savetikHtml })
+    if (u.includes('tikwm.com/api')) return Response.json({ code: 0, data: { title: 'T', play: 'https://cdn.test/play.mp4', hdplay: 'https://cdn.test/hdplay.mp4' } })
+    throw new Error('URL tak dikenal di stub: ' + u)
+  }
+  // Savetik sukses: video utama = SD [1], bukan HD.
+  const info = await tiktok.getInfo('https://vt.tiktok.com/abc/', { fetchFn })
+  assert.equal(info.downloadUrl, 'https://cdn.test/sd1.mp4')
+  assert.equal(info.fileName, 'tiktok.mp4')
+  assert.ok(!methods.includes('HEAD'), 'getInfo tidak boleh HEAD: ' + methods.join(','))
+  // Savetik gagal -> fallback tikwm (play/SD).
+  const fbFetch = async (url, opts = {}) => {
+    methods.push(opts.method || 'GET')
+    if (String(url).includes('savetik.io/api')) return Response.json({ status: 'fail', data: '' })
+    if (String(url).includes('tikwm.com/api')) return Response.json({ code: 0, data: { title: 'T', play: 'https://cdn.test/play.mp4', hdplay: 'https://cdn.test/hdplay.mp4' } })
+    throw new Error('URL tak dikenal di stub')
+  }
+  const fb = await tiktok.getInfo('https://vt.tiktok.com/abc/', { fetchFn: fbFetch })
+  assert.equal(fb.downloadUrl, 'https://cdn.test/play.mp4')
+  // Foto >1 -> list bermediaItems (album); foto didahulukan atas video.
+  const photoHtml = '<h3>Foto</h3><div class="photo-list">' +
+    '<div class="download-items"><a href="https://cdn.test/f1.jpg">1</a></div>' +
+    '<div class="download-items"><a href="https://cdn.test/f2.jpg">2</a></div></div>' +
+    '<div class="dl-action"><a href="https://cdn.test/v.mp4">Download MP4 [1]</a></div>'
+  const photoFetch = async (url) => {
+    if (String(url).includes('savetik.io/api')) return Response.json({ status: 'ok', data: photoHtml })
+    throw new Error('tikwm tidak boleh dipanggil bila savetik sudah memberi foto')
+  }
+  const list = await tiktok.getInfo('https://vt.tiktok.com/abc/', { fetchFn: photoFetch })
+  assert.equal(list.isList, true)
+  assert.equal(list.mediaItems.length, 2)
+  assert.equal(list.mediaItems[0].downloadUrl, 'https://cdn.test/f1.jpg')
+  // Kedua resolver gagal total -> error, bukan sukses kosong.
+  const deadFetch = async () => Response.json({ status: 'fail', data: '' })
+  await assert.rejects(() => tiktok.getInfo('https://vt.tiktok.com/abc/', { fetchFn: deadFetch }))
 })
 
 test('facebook: tautan TERAKHIR dari resolver dipilih (aturan legacy)', async () => {
@@ -62,6 +100,8 @@ test('instagram: semua tautan jadi list, #item memilih satu', async () => {
   const list = await instagram.getInfo('https://www.instagram.com/p/ABC/', { fetchFn })
   assert.equal(list.isList, true)
   assert.equal(list.files[0].fileName, 'instagram-1')
+  assert.equal(list.mediaItems.length, 2, 'list multi-media membawa mediaItems untuk dikirim semua')
+  assert.equal(list.mediaItems[1].downloadUrl, 'https://instatiktok.com/force-download.php?url=BBB')
   const picked = await instagram.getInfo('https://www.instagram.com/p/ABC/#item=2', { fetchFn })
   assert.equal(picked.fileName, 'instagram-2')
   assert.equal(picked.mimetype, null)
