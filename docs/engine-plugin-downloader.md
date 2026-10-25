@@ -92,6 +92,10 @@ Aturan antrean `.dl`:
   berjalan lagi.
 - Info file dikirim prosesor (`lib/downloader/runJob.js`) SEBELUM unduhan
   dimulai — jangan menahan metadata menunggu file selesai.
+- File video hasil unduhan dikirim ke WA sebagai **dokumen**, bukan pesan
+  video (opsi `asDocument` di `sendFile`; penanda mimetype + ekstensi).
+  Foto tetap image, audio tetap audio; album IG tidak berubah (dokumen
+  tidak bisa masuk album) dan `.tt` tidak tersentuh.
 - Batas ukuran unduhan 2 GiB (streaming, ditegakkan `streamToFile`);
   pengiriman ke WA berplafon 150 MB (`conn.sendFile`), file lebih besar
   hanya disimpan ke disk dan dilaporkan.
@@ -100,7 +104,15 @@ Aturan antrean `.dl`:
 - Link yang sama tidak boleh diproses dua kali: masih mengantri -> ditolak
   ("sudah ada di antrean #N"); baru keluar dari antrean -> cooldown 1 menit
   sebelum boleh diproses lagi (perbandingan URL persis setelah normalisasi
-  `new URL().href`).
+  `new URL().href`). Untuk pengujian, founder bisa mengosongkan antrean
+  + cooldown sekaligus lewat `.clearqueue` / `.cq` (founder-only,
+  `plugins/owner/clearqueue.js`): job pending dan klaim manual `.tt`
+  dihapus, daftar cooldown dikosongkan, job yang sedang aktif dibiarkan
+  dan dilaporkan; nomor urut `seq` tidak direset. Pasangannya,
+  `.listqueue` / `.lq` (founder-only, `plugins/owner/listqueue.js`),
+  menampilkan seluruh antrean (semua pengguna, bukan hanya peminta seperti
+  `.dl antrean`) plus daftar cooldown yang masih hidup; `snapshot()`
+  antrean ikut mengekspos `recent` (sudah di-prune) untuk keperluan ini.
 - Folder hasil unduhan semua provider ada di `src/downloads/<provider>/`
   (gitignored); folder dipastikan ada lewat helper `lib/helpers/ensureDir.js`.
 - Provider Facebook/Instagram/TikTok memakai mode respons senyaman mungkin
@@ -141,6 +153,43 @@ folder tmp-nya — berlaku juga untuk follow-up `hd`/`mp3`. Validasi
 `net.js` sengaja TIDAK dilemahkan untuk menutupi ini. Kegagalan `.tt`
 kini dilog mentah di terminal dan dilaporkan guardian ke DM founder
 (fase `send`), bukan hanya pesan generik dispatcher.
+
+## Sesi pilih GoFile dan batch unduh-semua (`.dl` interaktif)
+
+Folder GoFile (`.dl` link `gofile.io/d/...`) tidak lagi berhenti di daftar
+"pilih #item + kirim ulang link" seperti Pixeldrain. Plugin `.dl`
+menitipkan `options: { pickSession: true }` ke job antrean (options harus
+objek serializable — antrean persist di JSON, bukan function); saat hasil
+list muncul, `runJob.js` membuka **sesi pilih** di
+`lib/helpers/pickSession.js` (kunci chat:sender, TTL 15 menit sliding,
+kedaluwarsa malas) dan mengirim prompt bernomor:
+
+- **angka** (teks biasa, tanpa reply) -> item itu diantrekan sebagai job
+  `#item=<n>`; sesi TETAP BUKA, jadi user bisa pilih berkali-kali tanpa
+  `.dl` ulang. Hook-nya di `plugins/downloader/pick.js` (plugin tanpa
+  perintah, hanya `handler.before`, pola `chat-registry.js`).
+- **all** -> satu job **batch**: sekuensial unduh -> kirim -> hapus per
+  item (hemat disk dibanding unduh semua dulu). Progres
+  (`done`/`failed`/`kept`, berisi index asli item) ditulis ke record
+  antrean lewat `queue.update()` tiap item selesai — restart bot di tengah
+  batch memulihkan job ke pending dan loop melewati item yang sudah
+  terkirim/disimpan. Item oversized (>150 MB) dan gagal kirim TIDAK
+  dihapus dari disk; jalurnya dilaporkan di ringkasan batch.
+- **lanjut** -> bila batch masih berjalan, laporkan progresnya; bila batch
+  terakhir sesi menyisakan item gagal, antrekan ulang HANYA item gagal
+  itu (index asli dipertahankan supaya `#item` tidak bergeser).
+- **batal** -> tutup sesi. Angka di luar daftar dibalas koreksi singkat.
+- **Anti-spam**: pick adalah job antrean biasa (`sessionPick: true`) —
+  dedupe saat mengantri dan batas per pengguna tetap berlaku, sehingga
+  spam pick berubah menjadi antrean berurutan; cooldown 60 detik dilewati
+  khusus pick (boleh pilih ulang item yang baru selesai). Pick yang
+  mengantri >1 ikut memakai react ⏳ + pesan posisi antrean yang dihapus
+  setelah selesai, dan react ✅/❌ di pesan angka/all saat job selesai.
+- Sesi hilang saat bot restart (RAM), tapi batch yang sedang berjalan
+  tetap lanjut otomatis lewat pemulihan antrean; setelah sesi expired,
+  kirim ulang link akan membuka sesi baru dan item bisa dipilih lagi
+  satu per satu. Pixeldrain dan `.tt` sengaja TIDAK diubah: Pixeldrain
+  tetap pola #item lama, `.tt` tetap store `tiktokFollowup`-nya sendiri.
 
 ## Penjaga engine (guardian)
 

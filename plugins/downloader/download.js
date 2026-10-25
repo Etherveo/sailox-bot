@@ -135,6 +135,10 @@ let handler = async (m, ctx) => {
     sender: m.sender,
     senderName: m.pushName || m.name || '',
     userMsgKey: m.key ?? null,
+    // GoFile saja yang membuka sesi pilih interaktif saat hasilnya list
+    // (lihat runJob: job.options.pickSession). Pixeldrain tetap pola
+    // #item lama, provider lain tidak punya hasil list seperti ini.
+    options: providerId === 'gofile' ? { pickSession: true } : undefined,
   })
 
   // Provider sosial: respons pertama = react ⏳. Antrean > 1 -> kirim satu

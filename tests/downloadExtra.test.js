@@ -239,8 +239,9 @@ test('engine baru terdaftar di registry nyata & deteksi provider bekerja', async
   assert.equal(registry.detectProvider('https://gofile.io.evil.test/d/abc'), null)
 })
 
-test('gofile: folder jadi list, #item memilih file, token tamu dipakai saat 401', async () => {
+test('gofile: folder jadi list, #item memilih file, token tamu + WT dipakai', async () => {
   const payload = {
+    status: 'ok',
     data: {
       name: 'Folderku',
       childrenIds: ['a', 'b'],
@@ -255,7 +256,9 @@ test('gofile: folder jadi list, #item memilih file, token tamu dipakai saat 401'
     const u = String(url)
     if (u.includes('/accounts')) return Response.json({ data: { token: 'TOK' } })
     if (u.includes('/contents/')) {
-      if (opts.headers?.Authorization !== 'Bearer TOK') return new Response('{}', { status: 401 })
+      assert.equal(opts.headers?.Authorization, 'Bearer TOK')
+      assert.match(opts.headers?.['X-Website-Token'] ?? '', /^[0-9a-f]{64}$/)
+      assert.equal(opts.headers?.['X-BL'], 'en-US')
       sawAuth = true
       return Response.json(payload)
     }
@@ -274,12 +277,23 @@ test('gofile: folder jadi list, #item memilih file, token tamu dipakai saat 401'
   assert.equal(gofile.match('https://gofile.io.evil.test/d/abc'), false)
 })
 
-test('gofile download: cookie token diteruskan & file ter-stream ke disk', async t => {
+test('gofile: WT deterministik dalam satu jendela waktu, berubah di jendela berikut', () => {
+  const a = gofile.generateWT('TOK', 1_700_000_000_000)
+  const b = gofile.generateWT('TOK', 1_700_000_000_000 + 1000)
+  const c = gofile.generateWT('TOK', 1_700_000_000_000 + 14400 * 1000)
+  assert.match(a, /^[0-9a-f]{64}$/)
+  assert.equal(a, b)
+  assert.notEqual(a, c)
+})
+
+test('gofile download: header Bearer + WT diteruskan & file ter-stream ke disk', async t => {
   const dir = await tmpDir(t)
-  let cookie = null
-  const fetchFn = async (url, opts = {}) => { cookie = opts.headers?.Cookie ?? null; return new Response('isi-file', { status: 200, headers: { 'content-type': 'video/mp4' } }) }
+  let headers = null
+  const fetchFn = async (url, opts = {}) => { headers = opts.headers ?? null; return new Response('isi-file', { status: 200, headers: { 'content-type': 'video/mp4' } }) }
   const result = await gofile.download('https://gofile.io/d/abc', { downloadUrl: 'https://file/dua', token: 'TOK', fileName: 'dua.mp4' }, { destDir: dir, baseName: 'dua', fetchFn })
-  assert.equal(cookie, 'accountToken=TOK')
+  assert.equal(headers?.Authorization, 'Bearer TOK')
+  assert.match(headers?.['X-Website-Token'] ?? '', /^[0-9a-f]{64}$/)
+  assert.equal(headers?.Referer, 'https://gofile.io/')
   assert.equal(await fs.readFile(result.filePath, 'utf8'), 'isi-file')
 })
 
