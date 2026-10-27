@@ -112,22 +112,53 @@ test('instagram: semua tautan jadi list, #item memilih satu', async () => {
 })
 
 // ─── Pinterest ───────────────────────────────────────────────────────────────
+// Mekanisme pindl (scrape langsung halaman pin), menggantikan steptodown
+// (port pindl2) yang rusak di lapangan: resolver mengembalikan HTML.
 
-test('pinterest: token steptodown + video didahulukan dari gambar', async () => {
-  assert.equal(pinterest.extractStepToken('<input name="token" value="tok123">'), 'tok123')
-  const data = { title: 'Pin Keren', medias: [
-    { url: 'https://pin/img.jpg', extension: 'jpg', formattedSize: '200 KB' },
-    { url: 'https://pin/vid.mp4', extension: 'mp4', formattedSize: '5 MB' },
-  ] }
-  assert.equal(pinterest.pickMedia(data.medias).url, 'https://pin/vid.mp4')
-  assert.equal(pinterest.pickMedia([data.medias[0]]).url, 'https://pin/img.jpg')
-  const fetchFn = async url => String(url).includes('video-data')
-    ? Response.json(data)
-    : new Response('<input name="token" value="tok123">')
-  const info = await pinterest.getInfo('https://id.pinterest.com/pin/123/', { fetchFn })
-  assert.equal(info.downloadUrl, 'https://pin/vid.mp4')
-  assert.equal(info.size, 5 * 1024 * 1024)
-  assert.equal(info.fileName, 'Pin Keren.mp4')
+test('pinterest: parsePinPage — orig didahulukan atas thumbnail, video & slide terdeteksi', () => {
+  const single = pinterest.parsePinPage(
+    '"seoTitle":"Pose Anime","images_orig":{"url":"https://i.pinimg.com/originals/ab/cd/ef/x.jpg"},'
+    + '"imageLargeUrl":"https://i.pinimg.com/140x140_RS/ab/cd/ef/x.jpg"',
+  )
+  assert.equal(single.type, 'single')
+  assert.equal(single.images[0].url, 'https://i.pinimg.com/originals/ab/cd/ef/x.jpg')
+  assert.equal(single.title, 'Pose Anime')
+
+  const video = pinterest.parsePinPage(
+    '"StoryPinVideoBlock","url":"https:\\/\\/v1.pinimg.com\\/videos\\/v.mp4"',
+  )
+  assert.equal(video.type, 'video')
+  assert.equal(video.videoUrl, 'https://v1.pinimg.com/videos/v.mp4')
+
+  const slide = pinterest.parsePinPage(
+    '"carouselData":{"carouselSlots":['
+    + '"images_1200x":{"height":1200,"url":"https://i.pinimg.com/1200x/aa/1.jpg","width":900},'
+    + '"images_1200x":{"height":1200,"url":"https://i.pinimg.com/1200x/bb/2.jpg","width":900}]}',
+  )
+  assert.equal(slide.type, 'slide')
+  assert.equal(slide.images.length, 2)
+  assert.equal(slide.images[1].url, 'https://i.pinimg.com/1200x/bb/2.jpg')
+})
+
+test('pinterest: getInfo single/carousel/#item + match', async () => {
+  const singleHtml = '"seoTitle":"Pin Keren","images_orig":{"url":"https://i.pinimg.com/originals/ab/x.jpg"}'
+  const info = await pinterest.getInfo('https://pin.it/abcde', { fetchFn: async () => new Response(singleHtml) })
+  assert.equal(info.downloadUrl, 'https://i.pinimg.com/originals/ab/x.jpg')
+  assert.equal(info.fileName, 'Pin Keren.jpg')
+  assert.equal(info.mimetype, 'image/jpeg')
+
+  const slideHtml = '"seoTitle":"Set","carouselData":{"carouselSlots":['
+    + '"images_1200x":{"height":1200,"url":"https://i.pinimg.com/1200x/aa/1.jpg","width":900},'
+    + '"images_1200x":{"height":1200,"url":"https://i.pinimg.com/1200x/bb/2.jpg","width":900}]}'
+  const list = await pinterest.getInfo('https://www.pinterest.com/pin/123/', { fetchFn: async () => new Response(slideHtml) })
+  assert.equal(list.isList, true)
+  assert.equal(list.mediaItems.length, 2, 'carousel jadi list bermediaItems untuk dikirim semua')
+  assert.equal(list.mediaItems[1].downloadUrl, 'https://i.pinimg.com/1200x/bb/2.jpg')
+  const picked = await pinterest.getInfo('https://www.pinterest.com/pin/123/#item=2', { fetchFn: async () => new Response(slideHtml) })
+  assert.equal(picked.fileName, 'Set-2.jpg')
+  assert.equal(picked.itemIndex, 2)
+  assert.equal(picked.downloadUrl, 'https://i.pinimg.com/1200x/bb/2.jpg')
+
   assert.equal(pinterest.match('https://pin.it/abcde'), true)
   assert.equal(pinterest.match('https://pinterest.com.evil.test/pin/1'), false)
 })

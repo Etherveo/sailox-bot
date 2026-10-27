@@ -69,6 +69,10 @@ const PROVIDER_LABELS = {
 
 function label(providerId) { return PROVIDER_LABELS[providerId] || providerId }
 
+// Daftar provider dalam bentuk per baris (bukan koma) supaya mudah dibaca
+// di chat — permintaan pemilik 2026-10-25.
+function providerList() { const list = supportedProviders().map(label); return list.length ? list.map(l => `• ${l}`).join('\n') : '(belum ada engine aktif)' }
+
 function sanitizeFileName(name = '') {
   const cleaned = String(name)
     .replace(/[\\/:*?"<>|\x00-\x1F]/g, '')
@@ -149,7 +153,7 @@ let handler = async (m, { conn, text, usedPrefix, command }) => {
       `Format: url | nama file custom (opsional, JANGAN tulis ekstensi) | kirim ke WA 1/0 (default 1)\n` +
       `Tambahkan "-c" di akhir kalau mau folder job dihapus dari disk lokal setelah semuanya kelar.\n` +
       `Link list Pixeldrain (/l/) tanpa #item= menampilkan isi list-nya dulu.\n\n` +
-      `Provider didukung: ${supportedProviders().map(label).join(', ')}`
+      `Provider didukung:\n${providerList()}`
     )
   }
 
@@ -178,7 +182,7 @@ let handler = async (m, { conn, text, usedPrefix, command }) => {
   if (!providerId) {
     throw (
       `❌ Domain tidak dikenali / belum didukung.\n` +
-      `Provider yang didukung: ${supportedProviders().map(label).join(', ')}`
+      `Provider yang didukung:\n${providerList()}`
     )
   }
   const engine = getEngine(providerId)

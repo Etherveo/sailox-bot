@@ -225,7 +225,7 @@ Catatan resolver per platform:
   `lib/downloader/instatiktok.js` (layanan instatiktok.com, dari legacy
   `downloader-download.js`). Pemilihan tautan mengikuti legacy: facebook
   = tautan terakhir; instagram = semua tautan (multi-file -> list).
-- pinterest memakai steptodown; twitter memakai vxtwitter dengan API
+- pinterest memakai scrape langsung halaman pin (port pindl); twitter memakai vxtwitter dengan API
   legacy sebagai cadangan.
 
 ## Pohon keputusan cepat

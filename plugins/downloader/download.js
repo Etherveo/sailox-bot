@@ -89,7 +89,9 @@ let handler = async (m, ctx) => {
     return runDownloadJob({ conn: activeConn, job: fresh, registry, rootDir, getJobState })
   })
 
-  const providersText = () => supportedProviders().map(providerLabel).join(', ') || '(belum ada engine aktif)'
+  // Daftar provider dalam bentuk per baris (bukan koma) supaya mudah
+  // dibaca di chat — permintaan pemilik 2026-10-25.
+  const providersText = () => { const list = supportedProviders().map(providerLabel); return list.length ? list.map(l => `• ${l}`).join('\n') : '(belum ada engine aktif)' }
   const raw = (text ?? '').trim()
 
   // --- Sub-perintah antrean ---
@@ -118,14 +120,14 @@ let handler = async (m, ctx) => {
       `Kirim link-nya langsung:\n${usedPrefix}${command} <link>\n\n` +
       `atau *balas* pesan yang berisi link dengan:\n${usedPrefix}${command}\n\n` +
       `Link dicari otomatis dari teks (harus diapit spasi).\n` +
-      `Provider didukung: ${providersText()}\n\n` +
+      `Provider didukung:\n${providersText()}\n\n` +
       `Unduhan masuk antrean supaya tidak spam — cek dengan ${usedPrefix}${command} antrean.`
     )
   }
 
   const providerId = registry.detectProvider(url)
   if (!providerId) {
-    throw `❌ Domain link ini belum didukung.\nProvider yang didukung: ${providersText()}`
+    throw `❌ Domain link ini belum didukung.\nProvider yang didukung:\n${providersText()}`
   }
 
   const { job, position, liveCount } = await queue.enqueue({

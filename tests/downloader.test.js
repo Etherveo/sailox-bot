@@ -4,9 +4,12 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import os from 'node:os'
 import { createEngineRegistry, inspectEngine, downloaderRegistry } from '../lib/downloader/registry.js'
+import { createDownloadQueue } from '../lib/downloader/queue.js'
 import { buildFileName, resolveExtension } from '../lib/downloader/mime.js'
 import * as pixeldrain from '../lib/downloader/engines/pixeldrain.js'
 import * as mediafire from '../lib/downloader/engines/mediafire.js'
+import dlHandler from '../plugins/downloader/download.js'
+import pinHandler from '../plugins/downloader/pin.js'
 import unduhHandler from '../plugins/downloader/unduh.js'
 import saveEngineHandler from '../plugins/owner/saveengine.js'
 import getEngineHandler from '../plugins/owner/getengine.js'
@@ -291,4 +294,55 @@ test('unduh: command u/unduh dan metadata founder', () => {
   assert.match('unduh', unduhHandler.command)
   assert.equal(unduhHandler.founder, true)
   assert.deepEqual(unduhHandler.tags, ['downloader'])
+})
+
+// ─── dl/u: daftar provider per baris ────────────────────────────────────────
+// Permintaan pemilik 2026-10-25: daftar provider didukung tampil sebagai
+// daftar per baris (bullet), bukan dipisah koma. Berlaku untuk pesan usage
+// (.dl/.u tanpa link) dan pesan domain tak didukung di kedua plugin.
+test('dl/u: daftar provider tampil per baris, bukan dipisah koma', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'sailox-providerlist-'))
+  t.after(() => fs.rm(root, { recursive: true, force: true }))
+  global.pluginLoader = { root: path.join(root, 'plugins') }
+  t.after(() => { delete global.pluginLoader })
+  const queue = createDownloadQueue({ file: path.join(root, 'q.json'), processJob: async () => ({}) })
+  const conn = fakeConn()
+  const m = fakeM()
+  const checkSection = thrown => {
+    const s = typeof thrown === 'string' ? thrown : String(thrown?.message ?? thrown)
+    const marker = s.includes('Provider didukung:\n') ? 'Provider didukung:\n' : 'Provider yang didukung:\n'
+    const body = s.slice(s.indexOf(marker) + marker.length).split('\n\n')[0]
+    const lines = body.split('\n').filter(Boolean)
+    assert.ok(lines.length >= 1, 'minimal satu provider tercantum')
+    assert.ok(lines.every(l => l.startsWith('• ')), 'setiap baris diawali bullet')
+    assert.ok(!body.includes(', '), 'tidak ada pemisah koma di dalam daftar')
+  }
+  await assert.rejects(dlHandler(m, { conn, text: '', usedPrefix: '.', command: 'dl', downloadQueue: queue }), e => { checkSection(e); return true })
+  await assert.rejects(dlHandler(m, { conn, text: 'https://example.invalid/x', usedPrefix: '.', command: 'dl', downloadQueue: queue }), e => { checkSection(e); return true })
+  await assert.rejects(unduhHandler(m, { conn, text: '', usedPrefix: '.', command: 'unduh' }), e => { checkSection(e); return true })
+  await assert.rejects(unduhHandler(m, { conn, text: 'https://example.invalid/x', usedPrefix: '.', command: 'unduh' }), e => { checkSection(e); return true })
+})
+
+// ─── .pin: gerbang Pinterest + delegasi antrean .dl ──────────────────────────
+test('pin: link Pinterest masuk antrean, non-Pinterest ditolak, query ditolak jelas', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'sailox-pin-'))
+  t.after(() => fs.rm(root, { recursive: true, force: true }))
+  global.pluginLoader = { root: path.join(root, 'plugins') }
+  t.after(() => { delete global.pluginLoader })
+  const queue = createDownloadQueue({ file: path.join(root, 'q.json'), processJob: async () => ({}) })
+  const conn = fakeConn()
+  const m = fakeM()
+  await pinHandler(m, { conn, text: 'https://pin.it/abcde', usedPrefix: '.', command: 'pin', downloadQueue: queue })
+  assert.match(m.replies.at(-1), /Masuk antrean/)
+  assert.match(m.replies.at(-1), /Pinterest/)
+  await assert.rejects(pinHandler(m, { conn, text: 'https://example.com/x.jpg', usedPrefix: '.', command: 'pin', downloadQueue: queue }), /bukan Pinterest/)
+  await assert.rejects(pinHandler(m, { conn, text: 'wallpaper anime', usedPrefix: '.', command: 'pin', downloadQueue: queue }), /masih disiapkan/)
+  await assert.rejects(pinHandler(m, { conn, text: '', usedPrefix: '.', command: 'pin', downloadQueue: queue }), /\.pin https:\/\/pin\.it/)
+  // Tunggu pump antrean selesai (job noop langsung done) sebelum cleanup,
+  // kalau tidak rm balapan dengan tulis file antrean.
+  for (let i = 0; i < 50; i++) {
+    const snap = await queue.snapshot()
+    if (!snap.jobs.length) break
+    await new Promise(r => setTimeout(r, 20))
+  }
 })
