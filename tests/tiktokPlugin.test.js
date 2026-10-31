@@ -6,8 +6,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import os from 'node:os'
 import { createDownloadQueue } from '../lib/downloader/queue.js'
-import { createTiktokFollowupStore } from '../lib/helpers/tiktokFollowup.js'
-import tiktokHandler from '../plugins/downloader/tiktok.js'
+import tiktokHandler, { createTiktokFollowupStore } from '../plugins/downloader/tiktok.js'
 
 async function tmpDir(t) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'sailox-tt-'))

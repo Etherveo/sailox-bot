@@ -1,7 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { buildMenuText, groupPluginHelp, resolveCategory, orderCategories, greetingFor } from '../lib/helpers/menuText.js'
-import menuHandler from '../plugins/main/menu.js'
+import menuHandler, { buildMenuText, groupPluginHelp, resolveCategory, orderCategories, greetingFor } from '../plugins/main/menu.js'
 
 const plugins = [
   { help: ['ping'], tags: ['info'] },

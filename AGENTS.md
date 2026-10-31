@@ -178,3 +178,147 @@ Before reporting work as done, confirm:
 - Documentation reflects the new behavior; transient findings are recorded in status documentation rather than in this file.
 
 The final report states the outcome, the affected files, the verification performed, remaining limitations or risks (including anything that needs a live WhatsApp test), and whether changes exist only locally (uncommitted or unpushed).
+
+## 12. Arsitektur plugin dan helper
+
+Aturan berikut ditetapkan pengguna pada 2026-10-28 dan mengikat semua pekerjaan plugin/helper. Prinsipnya: modularisasi berdasarkan kebutuhan nyata, bukan berdasarkan keinginan untuk mempersingkat plugin.
+
+### Prinsip utama
+
+**Jangan melakukan modularisasi secara berlebihan hanya demi membuat file plugin terlihat pendek.** Setiap kali membuat atau memodifikasi plugin, utamakan penempatan seluruh logic yang spesifik terhadap fitur tersebut langsung di dalam file plugin itu sendiri.
+
+Plugin adalah implementasi utuh dari sebuah fitur atau tugas tertentu. Jika suatu fitur dapat berdiri sendiri, biarkan ia berdiri sendiri. Tidak ada kewajiban untuk memecah logic ke beberapa file hanya demi kerapian semu, mengurangi jumlah baris kode, atau mengikuti prinsip modularisasi secara membabi buta.
+
+Sebaliknya, helper adalah komponen pendukung yang memiliki nilai guna ulang yang nyata. Helper dibuat untuk menghindari duplikasi logic yang benar-benar sama, menyediakan fungsionalitas universal, atau menjadi fondasi bersama bagi beberapa fitur yang saling berkaitan.
+
+### Ketentuan direktori `lib/helpers/`
+
+Direktori `lib/helpers/` hanya boleh berisi dua kategori berikut.
+
+#### A. Baseline atau engine bersama
+
+Logic yang secara nyata digunakan oleh beberapa plugin dan memiliki implementasi inti yang sama sehingga layak dijadikan komponen bersama.
+
+Contoh:
+- Engine untuk beberapa varian plugin yang menggunakan alur pemrosesan, parsing, atau mekanisme inti yang sama.
+- Komponen bersama untuk satu keluarga fitur yang memiliki banyak varian dengan perbedaan pada parameter, filter, atau penyajian hasil.
+
+Contohnya adalah plugin Kuramanime dengan varian `ongoing` dan `search`. Jika kedua varian berbagi logic inti yang cukup signifikan, logic tersebut boleh ditempatkan dalam engine helper tersendiri agar tidak terjadi duplikasi kode.
+
+Namun, jangan memaksakan pembuatan engine jika kedua varian hanya memiliki sedikit kesamaan atau jika pemisahan tersebut justru membuat alur program lebih sulit dipahami.
+
+#### B. Helper universal
+
+Fungsionalitas yang secara praktis memang merupakan utilitas umum, dapat digunakan kembali dalam berbagai konteks, dan tidak terikat pada satu plugin atau satu fitur spesifik.
+
+Contoh:
+- `react.js` untuk menangani reaksi terhadap pesan dalam berbagai kebutuhan plugin.
+- `ensureDir.js` untuk memastikan sebuah direktori tersedia sebelum digunakan.
+- Utilitas umum lain yang memiliki tanggung jawab jelas dan dapat digunakan secara independen oleh berbagai fitur.
+
+Universalitas tidak cukup dinilai dari kemungkinan bahwa suatu fungsi *bisa saja* digunakan kembali. Harus ada kegunaan lintas konteks yang masuk akal dan nyata.
+
+### Hal yang dilarang di `lib/helpers/`
+
+#### A. Helper yang hanya membungkus satu fitur
+
+Jangan memindahkan logic ke helper jika logic tersebut hanya digunakan oleh satu plugin, tidak memiliki kebutuhan penggunaan ulang yang konkret, dan tidak merupakan bagian dari fondasi bersama.
+
+Contoh yang tidak diperbolehkan:
+- `renderBratPng.js` apabila seluruh fungsinya hanya mendukung satu fitur Brat tanpa kebutuhan lintas fitur yang nyata.
+- Helper khusus untuk mengambil data, memproses hasil, atau membentuk output yang hanya dibutuhkan satu plugin.
+- File helper yang dibuat semata-mata untuk menampung beberapa fungsi agar file plugin menjadi lebih pendek.
+
+Jika suatu fitur hanya memiliki satu implementasi dan tidak membutuhkan abstraksi bersama, letakkan seluruh logic-nya langsung di plugin.
+
+#### B. Pemecahan file tanpa manfaat arsitektural
+
+Jangan membuat helper untuk setiap fungsi kecil, setiap tahapan proses, atau setiap operasi yang sebenarnya sederhana dan hanya digunakan pada satu tempat.
+
+Hindari struktur seperti berikut apabila tidak ada kebutuhan penggunaan ulang yang nyata:
+
+`plugin → helper khusus → utilitas khusus → fungsi pembungkus lain`
+
+Rantai abstraksi semacam ini menambah kompleksitas navigasi tanpa memberikan manfaat yang sebanding.
+
+#### C. Helper yang menjadi plugin kedua
+
+Jangan sampai sebuah helper berisi hampir seluruh implementasi fitur, sedangkan plugin hanya menjadi pembungkus tipis yang meneruskan parameter lalu memanggil helper tersebut.
+
+Jika sebuah file di `lib/helpers/` memiliki identitas, alur kerja, dan tanggung jawab yang sebenarnya merupakan satu fitur mandiri, evaluasi kembali penempatannya. Kemungkinan besar logic tersebut seharusnya berada di plugin.
+
+Pengecualian hanya berlaku apabila file tersebut memang merupakan engine bersama bagi beberapa plugin atau merupakan komponen fundamental yang digunakan secara nyata oleh berbagai fitur.
+
+### Kriteria memutuskan lokasi logic
+
+Sebelum memindahkan logic ke helper, evaluasi pertanyaan berikut:
+
+1. Apakah logic ini benar-benar digunakan oleh lebih dari satu plugin?
+2. Apakah implementasinya memang sama, bukan sekadar memiliki bentuk yang mirip?
+3. Apakah pemisahan tersebut mengurangi duplikasi yang berarti atau menyediakan abstraksi yang jelas?
+4. Apakah helper tetap memiliki tanggung jawab yang terdefinisi dengan baik dan tidak terikat pada satu fitur tertentu?
+5. Apakah pemisahan ini membuat pemeliharaan, debugging, dan pengembangan menjadi lebih mudah?
+
+Jika jawabannya sebagian besar tidak, **jangan buat helper; pertahankan logic di dalam plugin**.
+
+Jumlah baris kode bukan alasan yang cukup untuk melakukan modularisasi. Plugin yang panjang tetapi mandiri dan mudah ditelusuri lebih baik daripada plugin pendek yang implementasinya tersebar di banyak file tanpa kebutuhan nyata.
+
+### Pengecualian: keluarga plugin dan engine bersama
+
+Modularisasi tetap dianjurkan apabila beberapa plugin merupakan varian dari satu keluarga fitur dan berbagi logic inti yang substansial.
+
+Sebagai contoh:
+
+- `kuramanime-ongoing.js`
+- `kuramanime-search.js`
+- `lib/helpers/kuramanime.js`
+
+Dalam struktur tersebut, helper berfungsi sebagai engine bersama, bukan sebagai tempat penampungan logic sembarang. Plugin tetap bertanggung jawab atas identitas fitur, parameter, pemanggilan engine, dan penyajian hasil sesuai kebutuhannya.
+
+Gunakan pendekatan ini hanya jika benar-benar memberikan manfaat. Jangan membuat engine hanya karena dua plugin memiliki nama, sumber data, atau beberapa baris kode yang serupa.
+
+### Prioritas debugging dan pengembangan
+
+Struktur plugin harus memudahkan developer menemukan dan memahami implementasi fitur secara langsung.
+
+Ketika sebuah plugin diperiksa melalui `getplugin` atau dibuka untuk debugging, developer idealnya dapat memahami alur utama fitur tanpa harus menelusuri banyak file tambahan yang sebenarnya tidak diperlukan.
+
+Oleh karena itu:
+- Utamakan keterbacaan alur fitur dalam satu file.
+- Hindari ketergantungan lintas file yang tidak memberikan manfaat nyata.
+- Pertahankan helper hanya ketika pemisahan tersebut memang membantu pemeliharaan atau penggunaan ulang.
+- Jangan mengorbankan kemudahan debugging hanya demi struktur yang terlihat lebih modular.
+
+### Aturan saat memodifikasi kode yang sudah ada
+
+Ketentuan ini berlaku bukan hanya ketika membuat plugin baru, tetapi juga ketika melakukan refactoring atau memperbaiki plugin yang sudah ada.
+
+- Jangan otomatis memindahkan logic dari plugin ke helper ketika melakukan refactoring.
+- Jangan membuat helper baru hanya karena sebuah fungsi terlihat dapat dipisahkan.
+- Jika menemukan helper yang hanya melayani satu plugin tanpa alasan arsitektural yang kuat, pertimbangkan untuk mengembalikan logic tersebut ke plugin.
+- Sebelum mengubah struktur, periksa seluruh penggunaan helper agar tidak merusak plugin lain.
+- Jangan memecah atau menggabungkan file tanpa manfaat konkret yang dapat dijelaskan.
+
+Jika sebuah helper sudah digunakan oleh beberapa plugin, jangan langsung menghapusnya hanya karena implementasinya terlihat spesifik. Evaluasi seluruh dependensinya terlebih dahulu dan pertahankan komponen bersama yang memang dibutuhkan.
+
+### Prinsip keputusan final
+
+Urutan prioritas dalam menentukan struktur kode adalah:
+
+1. **Kebenaran fungsi:** fitur harus bekerja sesuai kebutuhan.
+2. **Keterbacaan:** alur program harus mudah dipahami.
+3. **Kemudahan debugging:** logic harus mudah ditemukan dan ditelusuri.
+4. **Penggunaan ulang yang nyata:** logic bersama boleh diabstraksikan.
+5. **Efisiensi pemeliharaan:** struktur harus mempermudah perubahan di masa mendatang.
+
+Modularisasi adalah alat untuk mencapai tujuan tersebut, bukan tujuan itu sendiri.
+
+**Kesimpulan tegas: plugin adalah tempat utama implementasi fitur. `lib/helpers/` bukan tempat pembuangan logic yang ingin dikeluarkan dari plugin. Jika sebuah logic bersifat khusus untuk satu fitur, biarkan logic tersebut berada di plugin. Pindahkan ke helper hanya jika ada kebutuhan penggunaan ulang yang nyata, merupakan fondasi bersama, atau memberikan manfaat arsitektural yang jelas.**
+
+### Tambahan
+
+Jangan mengasumsikan bahwa setiap kemiripan logic membutuhkan helper baru.
+- Misalnya, dua plugin sama-sama melakukan fetch(), parsing JSON, dan mengirim pesan WhatsApp. Itu belum berarti keduanya harus berbagi helper. Operasi yang sama belum tentu merupakan abstraksi yang layak disatukan jika kebutuhan, penanganan error, atau alur masing-masing berbeda.
+- Sebaliknya, apabila lima plugin membutuhkan mekanisme retry HTTP yang benar-benar sama, helper retry yang independen dapat menjadi abstraksi yang tepat.
+
+Dengan kata lain, ukuran yang tepat bukan sekadar berapa banyak plugin yang menggunakan kode tersebut, melainkan seberapa nyata kesamaan tanggung jawabnya dan apakah pemisahan itu benar-benar mengurangi kompleksitas.

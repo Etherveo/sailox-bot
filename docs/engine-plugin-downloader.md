@@ -167,7 +167,7 @@ kedaluwarsa malas) dan mengirim prompt bernomor:
 - **angka** (teks biasa, tanpa reply) -> item itu diantrekan sebagai job
   `#item=<n>`; sesi TETAP BUKA, jadi user bisa pilih berkali-kali tanpa
   `.dl` ulang. Hook-nya di `plugins/downloader/pick.js` (plugin tanpa
-  perintah, hanya `handler.before`, pola `chat-registry.js`).
+  perintah, hanya `handler.before`).
 - **all** -> satu job **batch**: sekuensial unduh -> kirim -> hapus per
   item (hemat disk dibanding unduh semua dulu). Progres
   (`done`/`failed`/`kept`, berisi index asli item) ditulis ke record

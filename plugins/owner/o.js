@@ -78,7 +78,6 @@ const handler = async (m, { conn, text, command, usedPrefix }) => {
 handler.help = ['o'];
 handler.tags = ['owner'];
 handler.command = ['o'];
-handler.group = false;
 handler.owner = true;
 
 export default handler;

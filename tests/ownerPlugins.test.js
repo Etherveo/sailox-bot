@@ -106,3 +106,53 @@ test('lp: semua, satu kategori, rentang abjad inklusif, dan multi kategori koma'
   assert.match(multi, /\*main\*/); assert.match(multi, /\*owner\*/); assert.doesNotMatch(multi, /\*tools\*/)
   await assert.rejects(run('ngawur'), /Kategori tidak ditemukan/)
 })
+
+test('gp: default teks, -f jadi file, teks >65000 jadi file', async t => {
+  const { root, loader } = await setup(t)
+  const sent = []
+  const fileConn = { role: 'main', sendFile: async (...a) => { sent.push(a) } }
+  const ctxF = (command, text) => ({ conn: fileConn, command, text, args: text ? text.split(/\s+/) : [] })
+  const base = code('owner')
+  const pad = (total) => `// ${'x'.repeat(total - base.length - 4)}\n${base}`
+  await savePluginFile({ root, loader, name: 'kecil', code: base })
+  await savePluginFile({ root, loader, name: 'sedang', code: pad(5000) })
+  await savePluginFile({ root, loader, name: 'tepat', code: pad(65000) })
+  await savePluginFile({ root, loader, name: 'besar', code: pad(65001) })
+  assert.equal(pad(65000).length, 65000)
+  assert.equal(pad(65001).length, 65001)
+
+  // Default: teks — termasuk yang dulu (>3000 byte) dikirim sebagai file.
+  const m1 = fakeM()
+  await getHandler(m1, ctxF('gp', 'kecil'))
+  assert.equal(m1.replies.at(-1), base)
+  const m2 = fakeM()
+  await getHandler(m2, ctxF('gp', 'sedang'))
+  assert.equal(m2.replies.at(-1), pad(5000))
+  assert.equal(sent.length, 0)
+
+  // Batas: tepat 65000 masih teks.
+  const m3 = fakeM()
+  await getHandler(m3, ctxF('gp', 'tepat'))
+  assert.equal(m3.replies.at(-1), pad(65000))
+  assert.equal(sent.length, 0)
+
+  // -f: file, tanpa balasan teks.
+  const m4 = fakeM()
+  await getHandler(m4, ctxF('gp', '-f kecil'))
+  assert.equal(m4.replies.length, 0)
+  assert.equal(sent.length, 1)
+  assert.equal(sent[0][0], 'tes@s.whatsapp.net')
+  assert.ok(Buffer.isBuffer(sent[0][1]))
+  assert.equal(sent[0][2], 'kecil.js')
+  assert.equal(sent[0][6].mimetype, 'text/javascript')
+
+  // >65000 tanpa -f: otomatis file.
+  const m5 = fakeM()
+  await getHandler(m5, ctxF('gp', 'besar'))
+  assert.equal(m5.replies.length, 0)
+  assert.equal(sent.length, 2)
+  assert.equal(sent[1][2], 'besar.js')
+
+  // -f tanpa target: usage.
+  await assert.rejects(getHandler(fakeM(), ctxF('gp', '-f')), /Gunakan \.gp \[-f\]/)
+})

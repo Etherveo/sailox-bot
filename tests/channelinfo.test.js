@@ -3,8 +3,7 @@
 // maupun bentuk datar, dan format balasan (termasuk peringatan peran).
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { parseChannelInput, normalizeChannelMetadata, formatChannelInfo } from '../lib/helpers/channelInfo.js'
-import channelinfoHandler from '../plugins/owner/channelinfo.js'
+import channelinfoHandler, { parseChannelInput, normalizeChannelMetadata, formatChannelInfo } from '../plugins/owner/channelinfo.js'
 
 const RAW_FIXTURE = {
   id: '120363123456789012@newsletter',

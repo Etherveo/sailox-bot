@@ -6,7 +6,8 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { formatSize, resolveTarget, scanDir, diskUsage } from '../lib/helpers/diskUsage.js'
+import { formatSize } from '../lib/helpers/text.js'
+import { resolveTarget, scanDir, diskUsage } from '../plugins/owner/diskusage.js'
 import handler from '../plugins/owner/diskusage.js'
 
 async function fixture(t) {

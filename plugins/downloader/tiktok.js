@@ -33,9 +33,38 @@ import { randomUUID } from 'node:crypto'
 import { match, resolveTiktok, download as downloadTiktokMedia } from '#lib/downloader/engines/tiktok.js'
 import { getDownloadQueue } from '#lib/downloader/queue.js'
 import { attachEngineNotifierWithConn, reportEngineError } from '#lib/downloader/index.js'
-import { ensureDir } from '#lib/helpers/ensureDir.js'
+import { ensureDir, ensureProviderDir } from '#lib/helpers/ensureDir.js'
 import { reactTo, REACT } from '#lib/helpers/react.js'
-import { tiktokFollowup } from '#lib/helpers/tiktokFollowup.js'
+
+// Penanda follow-up interaktif .tt (balas hd/mp3) — padanan conn.tiktokopt
+// legacy. Kunci = chat:sender (legacy hanya sender; chat ditambahkan supaya
+// balasan 'hd' di grup lain tidak ikut terpicu). Kedaluwarsa MALAS (lazy):
+// entri kedaluwarsa dianggap tidak ada saat dibaca — tanpa timer, tanpa
+// timer bocor saat proses berjalan lama.
+//
+// Store tinggal di sini sejak refactor aturan arsitektur 2026-10-28
+// (sebelumnya lib/helpers/tiktokFollowup.js — hanya dipakai plugin ini).
+export const TIKTOK_FOLLOWUP_TTL_MS = 40 * 1000
+
+export function createTiktokFollowupStore({ ttlMs = TIKTOK_FOLLOWUP_TTL_MS, now = () => Date.now() } = {}) {
+  const map = new Map()
+  const key = (chat, sender) => `${chat}:${sender}`
+  return {
+    put(chat, sender, value) { map.set(key(chat, sender), { ...value, expiresAt: now() + ttlMs }) },
+    get(chat, sender) {
+      const k = key(chat, sender)
+      const e = map.get(k)
+      if (!e) return null
+      if (e.expiresAt <= now()) { map.delete(k); return null }
+      return e
+    },
+    delete(chat, sender) { map.delete(key(chat, sender)) },
+    get size() { return map.size },
+  }
+}
+
+/** Singleton dipakai plugin .tt. */
+export const tiktokFollowup = createTiktokFollowupStore()
 
 // Plafon kirim WA (sama dengan maxMedia di lib/simple.js): file yang
 // diunduh .tt tidak pernah melebihi ini karena langsung dikirim, bukan
@@ -52,7 +81,8 @@ function projectRoot() {
 // Folder tmp dihapus pemanggil setelah sendFile selesai — baik sukses
 // maupun gagal kirim — supaya tidak menumpuk.
 async function downloadMediaToTmp(url, waFileName, root) {
-  const dir = path.join(root, 'src', 'downloads', 'tiktok', `tt-${Date.now()}-${randomUUID().slice(0, 8)}`)
+  const providerDir = await ensureProviderDir(root, 'tiktok')
+  const dir = path.join(providerDir, `tt-${Date.now()}-${randomUUID().slice(0, 8)}`)
   await ensureDir(dir)
   try {
     const baseName = path.parse(waFileName).name || 'tiktok'

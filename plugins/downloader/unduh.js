@@ -43,7 +43,7 @@ import {
   attachEngineNotifierWithConn
 } from '#lib/downloader/index.js'
 import { isKdriveWrapperUrl } from '#lib/helpers/kdriveRelay.js'
-import { ensureDir } from '#lib/helpers/ensureDir.js'
+import { ensureDir, ensureProviderDir } from '#lib/helpers/ensureDir.js'
 import { preResolveKdrive, episodeCandidate } from '#lib/helpers/kdrivePreResolve.js'
 
 const WA_MAX_BYTES = 150 * 1024 * 1024 // plafon conn.sendFile di lib/simple.js (maxMedia)
@@ -231,8 +231,7 @@ let handler = async (m, { conn, text, usedPrefix, command }) => {
   }
 
   // --- Siapkan folder kerja khusus job ini di src/downloads/<provider>/ ---
-  const providerDir = path.join(projectRoot(), 'src', 'downloads', providerId)
-  await ensureDir(providerDir)
+  const providerDir = await ensureProviderDir(projectRoot(), providerId)
 
   const baseSource = nameArg || stripKnownExtension(info.fileName || 'file')
   const safeBaseName = sanitizeFileName(baseSource)

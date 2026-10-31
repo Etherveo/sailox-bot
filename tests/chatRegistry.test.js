@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { createChatRegistry } from '../lib/helpers/chatRegistry.js'
+import { createChatRegistry } from '../plugins/system/chat-registry.js'
 
 test('registry: mencatat grup dan orang yang bernama; yang tanpa nama diabaikan', async () => {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'registry-'))

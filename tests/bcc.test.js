@@ -3,9 +3,8 @@
 // pengiriman gambar + caption (termasuk split caption >1024).
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { createBccSessionStore, decideBcc, combineBccTexts, previewBcc, resolveBccTarget, BCC_SESSION_TTL_MS } from '../lib/helpers/bccSession.js'
+import bccHandler, { createBccSessionStore, decideBcc, combineBccTexts, previewBcc, resolveBccTarget, BCC_SESSION_TTL_MS } from '../plugins/owner/bcc.js'
 import { coerceConfigValue } from '../lib/helpers/configStore.js'
-import bccHandler from '../plugins/owner/bcc.js'
 
 const CHANNEL = '120363111222333@newsletter'
 

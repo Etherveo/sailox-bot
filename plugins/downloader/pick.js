@@ -3,8 +3,7 @@
 // Hook pilih interaktif untuk sesi list GoFile (lihat
 // lib/helpers/pickSession.js dan lib/downloader/runJob.js).
 //
-// Plugin tanpa perintah (pola plugins/main/chat-registry.js): hanya
-// handler.before yang bekerja. Pesan teks biasa dari pembuka sesi di chat
+// Plugin tanpa perintah: hanya handler.before yang bekerja. Pesan teks biasa dari pembuka sesi di chat
 // yang sama, selama sesinya buka:
 //   - angka (1..N)  -> antrekan item itu sebagai job #item (sesi tetap buka)
 //   - all / semua   -> satu job batch unduh-semua (sekuensial)

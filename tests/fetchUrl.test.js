@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mimeToExt, parseFetchArgs, planFetch, MAX_REPLY_CHARS } from '../lib/helpers/fetchUrl.js'
+import { mimeToExt, parseFetchArgs, planFetch, MAX_REPLY_CHARS } from '../plugins/tools/fetch.js'
 
 test('mimeToExt: peta umum + fallback bin + abaikan parameter', () => {
   assert.equal(mimeToExt('image/png'), 'png')

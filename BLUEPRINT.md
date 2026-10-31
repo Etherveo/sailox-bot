@@ -1045,7 +1045,6 @@ const handler = async (m, { conn, text, command, usedPrefix }) => {
 handler.help = ['o'];
 handler.tags = ['owner'];
 handler.command = ['o'];
-handler.group = false;
 handler.owner = true;
 
 export default handler;
@@ -1054,7 +1053,7 @@ export default handler;
 Kebutuhan agar jalan:
 
 - Tanpa dependensi npm tambahan (hanya `node:child_process`, `node:fs`, `node:path` bawaan) dan tanpa import relatif — paling portabel dari ketiganya. Murni butuh interpreter/compiler sistem (`python3`, `php`, `java`+`javac`, `g++`, `node`) tersedia di PATH; bila salah satu tidak ada, command untuk bahasa itu gagal dengan pesan error dari `exec()` apa adanya (perilaku asli, tidak diubah).
-- `handler.group = false`: di bawah kontrak gerbang baru (tabel 9.2), nilai falsy berarti **tidak ada** syarat grup (boleh dipakai di grup maupun private) — sama seperti tidak mendeklarasikan `handler.group` sama sekali. **Perlu diverifikasi saat uji kompatibilitas** (langkah 3 di atas): bila perilaku yang diharapkan pemilik justru "hanya private", beri tahu — kontrak lama untuk nilai `false` eksplisit tidak dapat dipastikan dari isi file ini saja.
+- `handler.group` tidak dideklarasikan (keputusan pemilik 2026-10-29: baris `handler.group = false` dari file asli sengaja tidak dipertahankan) — di bawah kontrak gerbang baru (tabel 9.2), itu berarti **tidak ada** syarat grup (boleh dipakai di grup maupun private), sama seperti nilai `false` eksplisit.
 - `handler.owner = true` (bukan `rowner`/founder) → gerbang levelnya **owner**, bukan founder — berbeda dari dua file lain yang founder-only. Dipertahankan apa adanya.
 - **Risiko operasional yang sudah ada di kode asli (diketahui, bukan untuk diperbaiki tanpa diminta):** nama berkas sementara tetap (`temp.<ext>`, `temp.class`, binari `temp`) di `tempDir` yang sama untuk semua pemanggilan — dua eksekusi bersamaan (dua owner, atau satu owner dua kali cepat) dapat saling menimpa/mengganggu berkas satu sama lain. Ini perilaku asli; tidak diubah kecuali pemilik memintanya secara eksplisit di luar migrasi verbatim ini.
 - `tempDir = path.join(process.cwd(), 'tmp')` — bukan berkas `tmp/` terpusat dari `lib/helpers/tmp.js` (6, 4.2) secara langsung, tetapi mengarah ke path yang sama (`<root>/tmp`) selama proses dijalankan dengan cwd di root proyek (normal untuk `npm start`). Pembersihan berkala `tmp/` (4.2) ikut membersihkan sisa berkas plugin ini bila compile/exec gagal sebelum sempat `unlinkSync`.
@@ -1431,7 +1430,7 @@ Default di bawah dipilih agar aman dan konsisten. Pemilik dapat mengubahnya; age
 17. **Login bot utama: pairing code adalah default**, QR code adalah opsi (4.3), sesuai permintaan eksplisit pemilik. Jadibot tetap pairing-only (10.4), tidak terpengaruh.
 18. **`global.conn`** adalah global baru (4.2) yang hanya ada demi kompatibilitas verbatim `owner/eval.js` (9.12). Bila kelak `eval.js` dihapus/diganti, `global.conn` boleh ikut dihapus — bukan bagian inti arsitektur.
 19. **`src/config/` tidak digitignore secara default** (3.1), berbeda dari `src/public/`/`src/private/`. Ini tebakan konservatif (menyamakan dengan pola `config.example.js` yang dikomit), bukan kepastian — tujuan folder ini sendiri belum ditentukan pemilik.
-20. ⚠ **`handler.group = false` pada `owner/o.js`** (9.12) diperlakukan sebagai "tanpa syarat grup" di bawah kontrak gerbang baru (sama seperti tidak mendeklarasikannya). Perlu dikonfirmasi saat migrasi apakah ini perilaku yang diharapkan pemilik, karena isi `owner-o.js` sendiri tidak menyatakan maksud nilai `false` eksplisit tersebut.
+20. ✅ **`owner/o.js`** (9.12) tidak mendeklarasikan `handler.group` — dikonfirmasi pemilik 2026-10-29: baris `handler.group = false` dari file asli sengaja dihapus; di bawah kontrak gerbang baru itu diperlakukan sebagai "tanpa syarat grup" (sama seperti nilai `false` eksplisit).
 
 ---
 

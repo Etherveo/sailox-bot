@@ -5,8 +5,7 @@ import path from 'node:path'
 import os from 'node:os'
 import { Database } from '../lib/database/engine.js'
 import { applyStoredConfig, setConfig, deleteConfig, listConfig, coerceConfigValue } from '../lib/helpers/configStore.js'
-import { configCommand } from '../lib/helpers/configCommands.js'
-import configHandler from '../plugins/owner/config.js'
+import configHandler, { configCommand } from '../plugins/owner/config.js'
 
 const GLOBAL_KEYS = ['logPrivacy', 'bots', 'prefix', 'defaultLimit']
 async function setup(t) {
