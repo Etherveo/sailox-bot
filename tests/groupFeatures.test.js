@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { parseTargets, findParticipant } from '../lib/helpers/groupTargets.js'
+import { parseTargets, resolveMentionTargets, findParticipant } from '../lib/helpers/groupTargets.js'
 import addHandler from '../plugins/group/add.js'
 import kickHandler from '../plugins/group/kick.js'
 import promoteHandler from '../plugins/group/promote.js'
@@ -20,15 +20,22 @@ const CREATOR = { id: '777666555444@lid', lid: '777666555444@lid', phoneNumber: 
 const PARTICIPANTS = [ALT, ADMIN, CREATOR]
 
 function fakeConn(statusByAction = {}) {
-  const calls = [], replies = [], sent = []
+  const calls = [], replies = [], sent = [], replyOpts = []
   const conn = {
-    calls, replies, sent,
+    calls, replies, sent, replyOpts,
     toJid: async id => (String(id).endsWith('@lid') ? null : String(id)),
     identity: {
       isBot: () => false,
       roleOf: () => ({ isOwner: false, isFounder: false }),
       toJid: async id => (String(id).endsWith('@lid') ? null : String(id)),
       resolve: async () => ({ jid: '6289528749986@s.whatsapp.net', lid: '555000111222@lid' }),
+      // Tiru mentionForm PN produksi: LID peserta yang nomornya dikenal
+      // berubah menjadi PN saat dipakai sebagai mention.
+      forAction: async ids => ids.map(id => {
+        const digits = String(id).split('@')[0].split(':')[0]
+        const participant = PARTICIPANTS.find(p => [p.id, p.lid, p.phoneNumber].some(v => String(v).split('@')[0] === digits))
+        return participant?.phoneNumber ?? String(id)
+      }),
     },
     getName: async () => 'Veo Cadangan',
     groupParticipantsUpdate: async (chat, ids, action) => { calls.push({ chat, ids, action }); return [{ status: statusByAction[action] ?? '200', jid: ids[0] }] },
@@ -37,7 +44,7 @@ function fakeConn(statusByAction = {}) {
     groupUpdateDescription: async (chat, desc) => { calls.push({ action: 'desc', desc }) },
     groupSettingUpdate: async (chat, setting) => { calls.push({ action: 'setting', setting }) },
     sendMessage: async (jid, content) => { sent.push({ jid, content }) },
-    reply: async (chat, text, m, opts) => { replies.push(String(text)) },
+    reply: async (chat, text, m, opts) => { replies.push(String(text)); replyOpts.push(opts) },
   }
   return conn
 }
@@ -57,6 +64,39 @@ test('findParticipant: ketemu dari bentuk PN, LID, maupun phoneNumber', () => {
   assert.equal(findParticipant(PARTICIPANTS, '555000111222@lid')?.id, ALT.id)
   assert.equal(findParticipant(PARTICIPANTS, { id: '628111222333@s.whatsapp.net' })?.id, ADMIN.id)
   assert.equal(findParticipant(PARTICIPANTS, '628123456789@s.whatsapp.net'), null)
+})
+
+test('resolveMentionTargets: label mengikuti bentuk mention final, bukan digit target mentah', async () => {
+  const conn = fakeConn()
+  const [target] = await resolveMentionTargets(conn, [{ id: ALT.id, digits: '555000111222' }], { participants: PARTICIPANTS })
+  assert.equal(target.mentionId, ALT.phoneNumber)
+  assert.equal(target.mentionDigits, '6289528749986')
+  assert.equal(target.mentionLabel, '@6289528749986')
+  const [unknown] = await resolveMentionTargets(conn, [{ id: '123456789012345@lid', digits: '123456789012345' }], { participants: PARTICIPANTS })
+  assert.equal(unknown.mentionId, '123456789012345@lid')
+  assert.equal(unknown.mentionLabel, '@123456789012345')
+})
+
+test('plugin grup: target dari tag LID tampil sebagai tag yang cocok dengan mentions', async () => {
+  const promoteConn = fakeConn()
+  await promoteHandler(baseM({ mentionedJid: [ALT.id] }), baseCtx(promoteConn, { command: 'promote' }))
+  assert.match(promoteConn.replies[0], /^@6289528749986 — sekarang jadi admin/)
+  assert.deepEqual(promoteConn.replyOpts[0].mentions, [ALT.phoneNumber])
+
+  const demoteConn = fakeConn()
+  await demoteHandler(baseM({ mentionedJid: [ADMIN.id] }), baseCtx(demoteConn, { command: 'demote' }))
+  assert.match(demoteConn.replies[0], /^@628111222333 — sekarang member biasa/)
+  assert.deepEqual(demoteConn.replyOpts[0].mentions, [ADMIN.phoneNumber])
+
+  const kickConn = fakeConn()
+  await kickHandler(baseM({ mentionedJid: [ALT.id] }), baseCtx(kickConn, { command: 'kick' }))
+  assert.match(kickConn.replies[0], /^@6289528749986 — berhasil dikeluarkan/)
+  assert.deepEqual(kickConn.replyOpts[0].mentions, [ALT.phoneNumber])
+
+  const addConn = fakeConn()
+  await addHandler(baseM({ mentionedJid: ['123456789012345@lid'] }), baseCtx(addConn, { command: 'add' }))
+  assert.match(addConn.replies[0], /^@123456789012345 — berhasil ditambahkan/)
+  assert.deepEqual(addConn.replyOpts[0].mentions, ['123456789012345@lid'])
 })
 
 test('add: member yang sudah ada ditolak (anti tambah ganda), non-member ditambahkan', async () => {

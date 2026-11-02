@@ -14,6 +14,8 @@
 // simpan lokal — unduh ke disk tanpa kirim WA — lalu upload ke Google
 // Drive memakai subsistem yang sama dengan .uptodrive (lib/gdrive,
 // folder tujuan bawaan yang sama; nama sama di Drive dilewati).
+// Jawaban persis "n" menutup sesi penawaran (dan sisa sesi alur anime
+// pengirim itu) tanpa mengunduh apa pun.
 // Kasus provider tanpa engine (🔗) tetap link polos tanpa penawaran:
 // bot memang tidak punya cara mengunduhnya.
 
@@ -145,17 +147,25 @@ async function uploadSavedFile(m, ctx, result) {
 
 // Penawaran simpan lokal kasus oversize: teks persis "y" (teks biasa,
 // tanpa reply) dari pembuka sesi di chat yang sama mengeksekusi unduhan
-// ke disk, lalu upload ke Drive. Sesi hanya pernah dibuka untuk
-// owner/founder, dan peran dicek ulang di sini sebelum eksekusi. Pesan
-// lain / tanpa sesi / dari bot sendiri dilewati begitu saja (return false).
+// ke disk, lalu upload ke Drive. Jawaban persis "n" menutup sesi
+// penawaran plus sisa sesi alur anime pengirim itu, tanpa unduhan.
+// Sesi hanya pernah dibuka untuk owner/founder, dan peran dicek ulang
+// di sini sebelum eksekusi. Pesan lain / tanpa sesi / dari bot sendiri
+// dilewati begitu saja (return false).
 handler.before = async (m, ctx) => {
   if (m.fromMe) return false
-  if ((m.text ?? '').trim().toLowerCase() !== 'y') return false
+  const answer = (m.text ?? '').trim().toLowerCase()
+  if (answer !== 'y' && answer !== 'n') return false
   const store = ctx?.oversizeOffers ?? oversizeOffers
   const offer = store.get(m.chat, m.sender)
   if (!offer) return false
   if (!ctx?.isFounder && !ctx?.isOwner) return false
   store.delete(m.chat, m.sender)
+  if (answer === 'n') {
+    clearFlow(flowKey(m))
+    await m.reply('Oke, tidak jadi disimpan — sesi ditutup.')
+    return true
+  }
   const conn = ctx?.conn ?? m.conn
   const run = ctx?.runDownloadJob ?? runDownloadJob
   const job = {

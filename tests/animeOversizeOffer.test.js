@@ -9,7 +9,7 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { runDownloadJob } from '../lib/downloader/runJob.js'
-import { setFlow, clearFlow, flowKey } from '../lib/helpers/animeFlow.js'
+import { setFlow, getFlow, clearFlow, flowKey } from '../lib/helpers/animeFlow.js'
 import pilihHandler, { createOversizeOfferStore, OVERSIZE_OFFER_TEXT } from '../plugins/anime/pilih.js'
 
 async function tmpDir(t) {
@@ -210,6 +210,40 @@ test('before: "y" dari non-owner ditolak walau sesi ada', async () => {
   assert.equal(await pilihHandler.before(m, ctx), false)
   assert.equal(ran, false)
   assert.ok(store.get('c1', 'A'), 'sesi tidak disentuh')
+})
+
+test('before: "n" dari owner menutup sesi penawaran + sesi alur, tanpa unduhan', async () => {
+  const store = createOversizeOfferStore()
+  store.put('c1', 'A', { provider: 'pixeldrain', url: 'https://pixeldrain.com/u/abc' })
+  let ran = false
+  const m = fakeMsg({ chat: 'c1', sender: 'A', text: 'n' })
+  setFlow(flowKey(m), { stage: 'providers', title: 'Ep 1', items: [] })
+  const ctx = { conn: fakeConn([]), isFounder: true, isOwner: true, oversizeOffers: store, runDownloadJob: async () => { ran = true } }
+  assert.equal(await pilihHandler.before(m, ctx), true)
+  assert.equal(ran, false, '"n" tidak boleh mengunduh apa pun')
+  assert.equal(store.get('c1', 'A'), null, 'sesi penawaran ditutup')
+  assert.equal(getFlow(flowKey(m)), null, 'sesi alur anime ikut ditutup')
+  assert.ok(m.replies.some(r => /sesi ditutup/.test(r)), 'ada konfirmasi penutupan')
+  clearFlow(flowKey(m))
+})
+
+test('before: "N" kapital sama-sama menutup sesi', async () => {
+  const store = createOversizeOfferStore()
+  store.put('c1', 'A', { provider: 'pixeldrain', url: 'u' })
+  const m = fakeMsg({ chat: 'c1', sender: 'A', text: 'N' })
+  const ctx = { conn: fakeConn([]), isFounder: true, oversizeOffers: store, runDownloadJob: async () => { throw new Error('tidak boleh jalan') } }
+  assert.equal(await pilihHandler.before(m, ctx), true)
+  assert.equal(store.get('c1', 'A'), null)
+})
+
+test('before: "n" dari non-owner ditolak walau sesi ada; tanpa sesi dilewati', async () => {
+  const store = createOversizeOfferStore()
+  store.put('c1', 'A', { provider: 'pixeldrain', url: 'u' })
+  const ctx = { conn: fakeConn([]), isFounder: false, isOwner: false, oversizeOffers: store, runDownloadJob: async () => { throw new Error('tidak boleh jalan') } }
+  assert.equal(await pilihHandler.before(fakeMsg({ chat: 'c1', sender: 'A', text: 'n' }), ctx), false)
+  assert.ok(store.get('c1', 'A'), 'sesi tidak disentuh non-owner')
+  const ownerCtx = { conn: fakeConn([]), isFounder: true, oversizeOffers: createOversizeOfferStore(), runDownloadJob: async () => { throw new Error('tidak boleh jalan') } }
+  assert.equal(await pilihHandler.before(fakeMsg({ chat: 'c1', sender: 'A', text: 'n' }), ownerCtx), false, 'tanpa sesi penawaran, "n" adalah obrolan biasa')
 })
 
 test('before: tanpa sesi / teks bukan "y" persis -> dilewati', async () => {
