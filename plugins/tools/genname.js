@@ -183,4 +183,5 @@ let handler = async (m, { text, usedPrefix, command }) => {
   await m.reply(names.length === 1 ? names[0] : names.map((name, i) => `${i + 1}. ${name}`).join('\n'))
 }
 handler.help = ['genname', 'genname 3 n5 num', 'genname -ssid', 'genname -user']; handler.tags = ['tools']; handler.command = /^genname$/i
+handler.sharing = true
 export default handler

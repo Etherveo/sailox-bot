@@ -6,5 +6,8 @@ let handler = async (m, { text }) => {
   user.name = match[1].trim(); user.age = +match[2]; user.registered = true; user.regTime = Date.now()
   await global.db.save('users'); await m.reply('Pendaftaran berhasil.')
 }
-handler.help = ['register Nama.umur']; handler.tags = ['main']; handler.command = /^(register|daftar)$/i
+handler.help = ['register Nama.umur'];
+handler.tags = ['main'];
+handler.command = /^(register|daftar)$/i;
+handler.register = false;
 export default handler

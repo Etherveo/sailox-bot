@@ -14,4 +14,5 @@ let handler = async (m, { conn, text, participants }) => {
   await conn.reply(m.chat, `@${digits}`, m, { mentions: [mentionId] })
 }
 handler.help = ['tagme [@tag/reply/nomor]']; handler.tags = ['tools', 'info']; handler.command = /^tagme$/i
+handler.sharing = true
 export default handler
