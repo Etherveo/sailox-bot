@@ -45,6 +45,8 @@ import {
 import { isKdriveWrapperUrl } from '#lib/helpers/kdriveRelay.js'
 import { ensureDir, ensureProviderDir } from '#lib/helpers/ensureDir.js'
 import { preResolveKdrive, episodeCandidate } from '#lib/helpers/kdrivePreResolve.js'
+import { requestBigSend, releaseBigSend, checkBigSend } from '#lib/helpers/sendGuard.js'
+import { isConnectionSendError, waitForConnectionOpen } from '#lib/helpers/sendRetry.js'
 
 const WA_MAX_BYTES = 150 * 1024 * 1024 // plafon conn.sendFile di lib/simple.js (maxMedia)
 const MAX_DOWNLOAD_BYTES = DEFAULT_MAX_DOWNLOAD_BYTES
@@ -241,6 +243,15 @@ let handler = async (m, { conn, text, usedPrefix, command }) => {
 
   const tooBigForWa = info.size != null && info.size > WA_MAX_BYTES
 
+  // Pra-cek Penjaga Kirim Besar khusus baris info (2026-11-06): pesan
+  // TIDAK boleh memvonis "tidak bisa" hanya dari plafon mentah 150 MB —
+  // founder bisa mengirim sampai 1 GB lewat reservasi. allowed di sini
+  // berarti "tidak ditolak keras" (keputusan akhir tetap di titik
+  // kirim); penolakan keras disebut alasannya di muka.
+  const bigPre = waFlag && tooBigForWa
+    ? checkBigSend({ surface: 'downloader/unduh.js', actor: m.sender, roleOf: id => conn.identity.roleOf(id), sizeBytes: info.size })
+    : null
+
   // --- INFORMASI FILE DIKIRIM DULU, terpisah dari proses unduhnya ---
   await conn.sendMessage(
     m.chat,
@@ -252,7 +263,7 @@ let handler = async (m, { conn, text, usedPrefix, command }) => {
         (nameArg ? `📝 Nama custom: ${nameArg}\n` : '') +
         (info.isList ? `🔢 Item ke-${info.itemIndex} dari ${info.listSize} di list\n` : '') +
         `📏 Ukuran: ${formatSize(info.size)}\n` +
-        `📲 Kirim ke WA: ${waFlag ? (tooBigForWa ? `Tidak bisa — file melebihi batas WA bot ini (${formatSize(WA_MAX_BYTES)}); file hanya disimpan ke disk` : 'Ya') : 'Tidak (hanya disimpan ke disk)'}\n` +
+        `📲 Kirim ke WA: ${!waFlag ? 'Tidak (hanya disimpan ke disk)' : !tooBigForWa ? 'Ya' : bigPre?.allowed ? 'Ya (lewat Penjaga Kirim Besar)' : `Tidak bisa — Penjaga Kirim Besar menolak (${bigPre?.reason}); file hanya disimpan ke disk`}\n` +
         `🧹 Hapus file lokal setelah selesai (-c): ${cleanupFlag ? 'Ya' : 'Tidak'}\n` +
         (isExtractFlag ? `ℹ️ Flag -y dikenali, tapi ekstrak arsip belum tersedia di bot ini — diabaikan.\n` : '') +
         (cleanupFlag && !waFlag
@@ -288,14 +299,47 @@ let handler = async (m, { conn, text, usedPrefix, command }) => {
     : ''
 
   // --- KIRIM KE WHATSAPP (fitur baru dibanding legacy) ---
+  // Di atas plafon biasa, file hanya berangkat dengan reservasi Penjaga
+  // Kirim Besar (permukaan ini founder-only: jatah founder sampai 1 GB,
+  // tetap tunduk anggaran RAM). Ditolak -> perilaku lama: hanya disimpan.
   let sentToWa = false
-  if (waFlag && actualSize <= WA_MAX_BYTES) {
-    try {
-      await conn.sendFile(m.chat, result.filePath, result.fileName, `📄 ${result.fileName}\n🌐 ${label(providerId)}`, m)
-      sentToWa = true
-    } catch (e) {
-      await conn.sendMessage(m.chat, { text: `⚠️ Gagal mengirim file ke WA:\n${e.message || e}\nFile tetap tersimpan di disk.` }, { quoted: m })
+  let sendFailed = false
+  let bigToken = null
+  let bigDenyReason = null
+  if (waFlag && actualSize > WA_MAX_BYTES) {
+    const res = await requestBigSend({ surface: 'downloader/unduh.js', actor: m.sender, roleOf: id => conn.identity.roleOf(id), sizeBytes: actualSize })
+    if (res.granted) bigToken = res.token; else bigDenyReason = res.reason
+  }
+  if (waFlag && (actualSize <= WA_MAX_BYTES || bigToken)) {
+    // Kirim dengan SATU pengulangan khusus kegagalan kelas koneksi
+    // (lib/helpers/sendRetry.js): tunggu koneksi pulih, minta reservasi
+    // baru bila file besar, lalu kirim ulang file yang sama dari disk.
+    // Error non-koneksi langsung gagal seperti sebelumnya.
+    for (let attempt = 1; !sentToWa; attempt++) {
+      try {
+        await conn.sendFile(m.chat, result.filePath, result.fileName, `📄 ${result.fileName}\n🌐 ${label(providerId)}`, m, false, bigToken ? { reservation: bigToken } : {})
+        sentToWa = true
+      } catch (e) {
+        if (bigToken) { releaseBigSend(bigToken); bigToken = null }
+        if (attempt > 1 || !isConnectionSendError(e)) {
+          sendFailed = true
+          await conn.sendMessage(m.chat, { text: `⚠️ Gagal mengirim file ke WA:\n${e.message || e}\nFile tetap tersimpan di disk.` }, { quoted: m })
+          break
+        }
+        await conn.sendMessage(m.chat, { text: '🔁 Koneksi terputus saat mengirim file — menunggu koneksi pulih, lalu pengiriman diulang…' }, { quoted: m }).catch(() => {})
+        if (!await waitForConnectionOpen(conn)) {
+          sendFailed = true
+          await conn.sendMessage(m.chat, { text: `⚠️ Gagal mengirim file ke WA:\n${e.message || e}\nFile tetap tersimpan di disk.` }, { quoted: m })
+          break
+        }
+        if (actualSize > WA_MAX_BYTES) {
+          const res = await requestBigSend({ surface: 'downloader/unduh.js', actor: m.sender, roleOf: id => conn.identity.roleOf(id), sizeBytes: actualSize })
+          if (res.granted) bigToken = res.token
+          else { bigDenyReason = res.reason; break }
+        }
+      }
     }
+    if (bigToken) releaseBigSend(bigToken)
   }
 
   if (!sentToWa) {
@@ -309,7 +353,11 @@ let handler = async (m, { conn, text, usedPrefix, command }) => {
           `📁 ${jobRel}` +
           sizeNote +
           (waFlag && actualSize > WA_MAX_BYTES
-            ? `\n📲 Tidak dikirim ke WA: melebihi batas ${formatSize(WA_MAX_BYTES)}. Ambil lewat panel/file manager.`
+            ? (bigDenyReason
+              ? `\n📲 Tidak dikirim ke WA: Penjaga Kirim Besar menolak (${bigDenyReason}). Ambil lewat panel/file manager.`
+              : sendFailed
+                ? `\n📲 Tidak dikirim ke WA: pengiriman gagal — file tetap tersimpan di disk.`
+                : `\n📲 Tidak dikirim ke WA: melebihi batas ${formatSize(WA_MAX_BYTES)}. Ambil lewat panel/file manager.`)
             : '')
       },
       { quoted: m }
@@ -333,5 +381,6 @@ handler.help = ['unduh <url> | nama file | kirimWA(1/0) [-c]']
 handler.tags = ['downloader']
 handler.command = /^u(?:nduh)?$/i
 handler.founder = true
+handler.bigSend = true
 
 export default handler

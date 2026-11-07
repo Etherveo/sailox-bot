@@ -6,7 +6,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import os from 'node:os'
 import { createDownloadQueue } from '../lib/downloader/queue.js'
-import tiktokHandler, { createTiktokFollowupStore } from '../plugins/downloader/tiktok.js'
+import tiktokHandler, { createTiktokFollowupStore, ttSendOptions, TT_VIDEO_INLINE_MAX_BYTES } from '../plugins/downloader/tiktok.js'
 
 async function tmpDir(t) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'sailox-tt-'))
@@ -114,5 +114,73 @@ test('plugin .tt: kirim SD, simpan follow-up, balas hd kirim HD lalu hapus entri
     assert.equal(sentFiles[1].name, 'tiktok_hd.mp4')
     assert.equal(await tiktokHandler.before(m2, { conn: fakeConn }), false)
     assert.equal(sentFiles.length, 2, 'entri sudah dihapus setelah dipakai')
+  } finally { globalThis.fetch = realFetch }
+})
+
+// ─── Gerbang dokumen video > 25 MB (2026-11-05) ────────────────────────────
+
+test('gerbang .tt: ttSendOptions hanya menandai video besar sebagai dokumen', async t => {
+  const MB = 1024 * 1024
+  const video = size => ({ filePath: '/tmp/tidak-perlu-ada.mp4', fileName: 'tiktok.mp4', mimetype: 'video/mp4', size })
+  assert.deepEqual(await ttSendOptions(video(94 * MB), 'tiktok_hd.mp4'), { asDocument: true })
+  assert.deepEqual(await ttSendOptions(video(10 * MB), 'tiktok.mp4'), {})
+  assert.deepEqual(await ttSendOptions(video(TT_VIDEO_INLINE_MAX_BYTES), 'tiktok.mp4'), {}, 'tepat 25 MB masih inline (gerbangnya > ambang)')
+  assert.deepEqual(await ttSendOptions(video(TT_VIDEO_INLINE_MAX_BYTES + 1), 'tiktok.mp4'), { asDocument: true })
+  // Foto dan audio sebesar apa pun tidak kena gerbang.
+  assert.deepEqual(await ttSendOptions({ filePath: '/tmp/x', fileName: 'tiktok-1.jpg', mimetype: 'image/jpeg', size: 40 * MB }, 'tiktok-1.jpg'), {})
+  assert.deepEqual(await ttSendOptions({ filePath: '/tmp/x', fileName: 'lagu.mp3', mimetype: 'audio/mpeg', size: 40 * MB }, 'lagu.mp3'), {})
+  // Mimetype kosong: sinyal ekstensi .mp4 tetap menangkap video.
+  assert.deepEqual(await ttSendOptions({ filePath: '/tmp/x', fileName: 'tiktok.mp4', mimetype: null, size: 30 * MB }, 'tiktok.mp4'), { asDocument: true })
+  // Ukuran tidak dilaporkan engine (null) -> diukur dari file di disk.
+  const dir = await tmpDir(t)
+  const big = path.join(dir, 'big.mp4')
+  await fs.writeFile(big, '')
+  await fs.truncate(big, TT_VIDEO_INLINE_MAX_BYTES + 1)
+  assert.deepEqual(await ttSendOptions({ filePath: big, fileName: 'big.mp4', mimetype: 'video/mp4', size: null }, 'big.mp4'), { asDocument: true })
+  const small = path.join(dir, 'small.mp4')
+  await fs.writeFile(small, 'kecil')
+  assert.deepEqual(await ttSendOptions({ filePath: small, fileName: 'small.mp4', mimetype: 'video/mp4', size: null }, 'small.mp4'), {})
+})
+
+test('plugin .tt: follow-up hd > 25 MB terkirim sebagai dokumen, SD kecil tetap inline', async () => {
+  const savetikHtml = '<h3>Judul Tes</h3><div class="dl-action">' +
+    '<a href="https://cdn.test/hd.mp4">Download MP4 HD</a>' +
+    '<a href="https://cdn.test/sd1.mp4">Download MP4 [1]</a></div>'
+  const realFetch = globalThis.fetch
+  globalThis.fetch = async url => {
+    if (String(url).includes('savetik.io/api')) return Response.json({ status: 'ok', data: savetikHtml })
+    if (String(url).includes('cdn.test/hd.mp4')) {
+      return new Response(new Uint8Array(TT_VIDEO_INLINE_MAX_BYTES + 1024), { headers: { 'content-type': 'video/mp4' } })
+    }
+    if (String(url).includes('cdn.test/')) {
+      return new Response(new Uint8Array([0, 0, 0, 24, 102, 116, 121, 112]), { headers: { 'content-type': 'video/mp4' } })
+    }
+    throw new Error('URL tak dikenal di stub: ' + url)
+  }
+  try {
+    const sentFiles = []
+    const fakeConn = {
+      sendFile: async (chat, src, name, caption, quoted, ptt, options) => { sentFiles.push({ src, name, options }) },
+      sendMessage: async () => ({}),
+    }
+    const fakeQueue = {
+      enqueue: async () => ({ job: { id: 9 } }),
+      finish: async () => {},
+    }
+    const m = {
+      chat: 'chat-tt2', sender: 'S-tt2', pushName: 'V',
+      key: { remoteJid: 'chat-tt2', id: 'msg1' },
+      conn: fakeConn, fromMe: false,
+      reply: async () => {},
+    }
+    await tiktokHandler(m, { conn: fakeConn, text: 'https://vt.tiktok.com/abc/', downloadQueue: fakeQueue })
+    assert.equal(sentFiles.length, 1)
+    assert.equal(sentFiles[0].name, 'tiktok.mp4')
+    assert.deepEqual(sentFiles[0].options, {}, 'SD kecil tetap video inline')
+    const m2 = { ...m, text: 'hd', key: { remoteJid: 'chat-tt2', id: 'msg2' } }
+    assert.equal(await tiktokHandler.before(m2, { conn: fakeConn }), true)
+    assert.equal(sentFiles.length, 2)
+    assert.equal(sentFiles[1].name, 'tiktok_hd.mp4')
+    assert.deepEqual(sentFiles[1].options, { asDocument: true }, 'HD di atas 25 MB jadi dokumen')
   } finally { globalThis.fetch = realFetch }
 })

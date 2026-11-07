@@ -4,4 +4,5 @@ handler.help = ['getfile <path|nomor>'];
 handler.tags = ['owner'];
 handler.command = /^getfile$/i;
 handler.owner = true
+handler.bigSend = true // opt-in Penjaga Kirim Besar: .getfile boleh mengirim file >150 MB dengan reservasi (fase 2)
 export default handler

@@ -23,6 +23,9 @@ test('sharing: normalizePlugin memaksa sharing jadi boolean (bawaan false)', () 
   assert.equal(normalizePlugin({ default: Object.assign(fn, { sharing: true }) }).sharing, true)
   assert.equal(normalizePlugin({ default: Object.assign(() => {}, {}) }).sharing, false)
   assert.equal(normalizePlugin({ default: Object.assign(() => {}, { sharing: 'yes' }) }).sharing, false)
+  // bigSend (opt-in Penjaga Kirim Besar) dinormalisasi dengan pola sama.
+  assert.equal(normalizePlugin({ default: Object.assign(() => {}, { bigSend: true }) }).bigSend, true)
+  assert.equal(normalizePlugin({ default: Object.assign(() => {}, {}) }).bigSend, false)
 })
 
 test('sharing: scaffoldSandbox menyalin plugin sharing ke sandbox; template menang saat bentrok', async t => {

@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { parseOngoingJson, buildLatestUrl, formatOngoingLabel, parseSearchPage, parseDetailPage } from '../lib/kuramanime/catalog.js'
-import { setFlow, getFlow, clearFlow, advanceFlow, formatProvidersView } from '../lib/helpers/animeFlow.js'
+import { setFlow, getFlow, clearFlow, flowKey, advanceFlow, formatProvidersView, isAnimeWhitelisted, animeAccess, assertAnimeAccess, animeCooldownLeft, assertAnimeCooldown, markAnimeUse, animeDownloadsToday, reserveAnimeDownload, releaseAnimeDownload, animeDayKey, ANIME_DAILY_LIMIT } from '../lib/helpers/animeFlow.js'
 import ongoingHandler from '../plugins/anime/ongoing.js'
 import cariHandler from '../plugins/anime/carianime.js'
 import animeHandler from '../plugins/anime/anime.js'
@@ -126,13 +126,121 @@ test('flow: nomor di luar jangkauan ditolak; state kedaluwarsa hilang', async ()
 
 // ─── metadata plugin ─────────────────────────────────────────────────────────
 
-test('plugin anime: tag anime, founder-only, perintah sesuai', () => {
+test('plugin anime: tag anime, BUKAN founder-only (gerbang whitelist di handler), perintah sesuai', () => {
   for (const h of [ongoingHandler, cariHandler, animeHandler, pilihHandler]) {
     assert.deepEqual(h.tags, ['anime'])
-    assert.equal(h.founder, true)
+    assert.equal(h.founder, undefined)
   }
   assert.match('ongoing', ongoingHandler.command)
   assert.match('carianime', cariHandler.command)
   assert.match('anime', animeHandler.command)
   assert.match('pilih', pilihHandler.command)
+})
+
+// ─── Akses whitelist & limit (2026-11-05) ────────────────────────────────────
+
+test('anime whitelist: cocok via nomor polos, JID, LID, dan resolver identitas', () => {
+  assert.equal(isAnimeWhitelisted('6289528749986@s.whatsapp.net', ['6289528749986']), true)
+  assert.equal(isAnimeWhitelisted('6289528749986@s.whatsapp.net', ['6289528749986@s.whatsapp.net']), true)
+  assert.equal(isAnimeWhitelisted('147368951459939@lid', ['147368951459939@lid']), true)
+  assert.equal(isAnimeWhitelisted('628111@s.whatsapp.net', ['6289528749986']), false)
+  assert.equal(isAnimeWhitelisted('628111@s.whatsapp.net', []), false)
+  // Resolver identitas menjembatani PN <-> LID walau entri != pengirim.
+  const same = (a, b) => (a === '999@lid' && b === '628999@s.whatsapp.net') || a === b
+  assert.equal(isAnimeWhitelisted('628999@s.whatsapp.net', ['999@lid'], same), true)
+})
+
+test('anime access: founder exempt; user whitelist + gerbang grup', () => {
+  const prev = globalThis.anime
+  globalThis.anime = { users: ['6289528749986'], groups: ['120363111@g.us'] }
+  try {
+    const dm = { sender: '6289528749986@s.whatsapp.net', chat: '6289528749986@s.whatsapp.net', isGroup: false }
+    const grupOk = { sender: '6289528749986@s.whatsapp.net', chat: '120363111@g.us', isGroup: true }
+    const grupTutup = { sender: '6289528749986@s.whatsapp.net', chat: '120363222@g.us', isGroup: true }
+    const asing = { sender: '628111@s.whatsapp.net', chat: '628111@s.whatsapp.net', isGroup: false }
+    assert.deepEqual(animeAccess(dm, {}), { exempt: false, ok: true })
+    assert.deepEqual(animeAccess(grupOk, {}), { exempt: false, ok: true })
+    assert.equal(animeAccess(grupTutup, {}).reason, 'group')
+    assert.equal(animeAccess(asing, {}).reason, 'user')
+    assert.equal(animeAccess(asing, { isFounder: true }).exempt, true)
+    assert.throws(() => assertAnimeAccess(asing, {}), /whitelist/)
+    assert.throws(() => assertAnimeAccess(grupTutup, {}), /grup ini/)
+  } finally {
+    if (prev === undefined) delete globalThis.anime; else globalThis.anime = prev
+  }
+})
+
+test('anime cooldown: sisa waktu dari animeLastAt, 0 sesudah 60 detik', () => {
+  const t = 1_700_000_000_000
+  const rec = {}
+  assert.equal(animeCooldownLeft(rec, t), 0)
+  markAnimeUse(rec, t)
+  assert.equal(rec.animeLastAt, t)
+  assert.equal(animeCooldownLeft(rec, t + 30_000), 30_000)
+  assert.equal(animeCooldownLeft(rec, t + 60_000), 0)
+  assert.throws(() => assertAnimeCooldown(rec, t + 1_000), /Cooldown anime/)
+  assert.doesNotThrow(() => assertAnimeCooldown(rec, t + 61_000))
+})
+
+test('anime kuota: reservasi 3x, ke-4 ditolak, release mengembalikan, hari baru mereset', () => {
+  const tz = 'Asia/Jakarta'
+  const now = Date.UTC(2026, 10, 5, 10, 0, 0)
+  const rec = {}
+  for (let i = 0; i < ANIME_DAILY_LIMIT; i++) reserveAnimeDownload(rec, now, tz)
+  assert.equal(animeDownloadsToday(rec, now, tz), 3)
+  assert.throws(() => reserveAnimeDownload(rec, now, tz), /Kuota unduhan anime/)
+  releaseAnimeDownload(rec, now, tz)
+  assert.equal(animeDownloadsToday(rec, now, tz), 2)
+  reserveAnimeDownload(rec, now, tz)
+  assert.equal(animeDownloadsToday(rec, now, tz), 3)
+  // Record dari hari lama dianggap 0 dan tereset saat reservasi berikutnya.
+  const lama = { animeDlDay: '2000-01-01', animeDlCount: 3 }
+  assert.equal(animeDownloadsToday(lama, now, tz), 0)
+  reserveAnimeDownload(lama, now, tz)
+  assert.equal(lama.animeDlDay, animeDayKey(now, tz))
+  assert.equal(lama.animeDlCount, 1)
+})
+
+test('animeDayKey: batas hari mengikuti zona waktu', () => {
+  assert.equal(animeDayKey(Date.UTC(2026, 10, 5, 16, 30), 'Asia/Jakarta'), '2026-11-05')
+  assert.equal(animeDayKey(Date.UTC(2026, 10, 5, 17, 30), 'Asia/Jakarta'), '2026-11-06')
+})
+
+test('pilih: user non-whitelist ditolak di gerbang, job tidak jalan', async () => {
+  const prev = globalThis.anime
+  globalThis.anime = { users: [], groups: [] }
+  const m = {
+    chat: '628111@s.whatsapp.net', sender: '628111@s.whatsapp.net', isGroup: false,
+    text: '1', fromMe: false, reply: async () => {},
+  }
+  setFlow(flowKey(m), { stage: 'providers', title: 'Ep', episodeUrl: 'https://kuramanime.example/episode/1', items: [{ url: 'https://pixeldrain.com/u/abc', quality: '720p', text: 'Pixeldrain' }] })
+  let ran = false
+  const ctx = { conn: {}, text: '1', usedPrefix: '.', command: 'pilih', isFounder: false, isOwner: false, userData: {}, runDownloadJob: async () => { ran = true; return { kind: 'file' } } }
+  try {
+    await assert.rejects(pilihHandler(m, ctx), /whitelist/)
+    assert.equal(ran, false)
+  } finally {
+    clearFlow(flowKey(m))
+    if (prev === undefined) delete globalThis.anime; else globalThis.anime = prev
+  }
+})
+
+test('pilih: user whitelist dengan kuota habis ditolak sebelum job jalan', async () => {
+  const prev = globalThis.anime
+  globalThis.anime = { users: ['6289528749986'], groups: [] }
+  const m = {
+    chat: '6289528749986@s.whatsapp.net', sender: '6289528749986@s.whatsapp.net', isGroup: false,
+    text: '1', fromMe: false, reply: async () => {},
+  }
+  setFlow(flowKey(m), { stage: 'providers', title: 'Ep', episodeUrl: 'https://kuramanime.example/episode/1', items: [{ url: 'https://pixeldrain.com/u/abc', quality: '720p', text: 'Pixeldrain' }] })
+  let ran = false
+  const userData = { animeDlDay: animeDayKey(Date.now()), animeDlCount: ANIME_DAILY_LIMIT, animeLastAt: 0 }
+  const ctx = { conn: {}, text: '1', usedPrefix: '.', command: 'pilih', isFounder: false, isOwner: false, userData, runDownloadJob: async () => { ran = true; return { kind: 'file' } } }
+  try {
+    await assert.rejects(pilihHandler(m, ctx), /Kuota unduhan anime/)
+    assert.equal(ran, false)
+  } finally {
+    clearFlow(flowKey(m))
+    if (prev === undefined) delete globalThis.anime; else globalThis.anime = prev
+  }
 })

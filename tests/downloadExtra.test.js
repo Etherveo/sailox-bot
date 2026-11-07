@@ -162,6 +162,100 @@ test('runJob: file terlalu besar untuk WA disimpan & dilaporkan, tidak dipaksaka
   assert.match(events.at(-1).text, /Unduhan #2 selesai/)
 })
 
+test('runJob: getInfo gagal di provider biasa -> chat peminta menerima pesan gagal (regresi 2026-11-06)', async t => {
+  const dir = await tmpDir(t)
+  const events = []
+  const engine = {
+    async getInfo() { throw new Error('Gagal mengambil informasi file Pixeldrain: HTTP 451 dari pixeldrain.com') },
+    async download() { throw new Error('download tidak boleh dipanggil') },
+  }
+  await assert.rejects(
+    runDownloadJob({ conn: fakeConn(events), job: { id: 28, url: 'https://pixeldrain.com/d/x', provider: 'pixeldrain', chat: 'c', sender: 'A' }, registry: { getEngine: () => engine }, rootDir: dir }),
+    /HTTP 451/
+  )
+  const failMsg = events.find(e => e.type === 'msg' && /Unduhan #28 gagal/.test(e.text))
+  assert.ok(failMsg, 'chat peminta harus menerima pesan gagal walau provider bukan quiet/reactable')
+  assert.match(failMsg.text, /HTTP 451/)
+})
+
+// ─── runJob: retry kirim khusus kegagalan kelas koneksi ─────────────────────
+// Insiden 2026-11-06: unggahan 978 MB mati karena koneksi backoff ±6 dtk.
+// Pengiriman diulang SEKALI sesudah koneksi pulih (waitForOpen diinjeksi
+// di sini supaya deterministik); error non-koneksi tidak diulang.
+
+function flakyConn(events, failPlan) {
+  let n = 0
+  return {
+    sendMessage: async (chat, content) => { events.push({ type: 'msg', text: content.text }) },
+    sendFile: async () => { n++; events.push({ type: 'file', n }); const e = failPlan[n - 1]; if (e) throw e },
+    get sends() { return n },
+  }
+}
+
+test('runJob: kirim putus koneksi sekali -> ditunggu, diulang, berhasil terkirim', async t => {
+  const dir = await tmpDir(t)
+  const events = []
+  const conn = flakyConn(events, [new Error('Connection Closed')])
+  const registry = { getEngine: () => fakeEngine(events) }
+  const result = await runDownloadJob({ conn, job: { id: 31, url: 'u', provider: 'pixeldrain', chat: 'c', sender: 'A' }, registry, rootDir: dir, waitForOpen: async () => true })
+  assert.equal(result.kind, 'file')
+  assert.equal(conn.sends, 2, 'pengiriman dicoba dua kali')
+  assert.ok(events.some(e => e.type === 'msg' && /🔁/.test(e.text)), 'peminta dikabari pengulangan')
+  assert.ok(!events.some(e => e.type === 'msg' && /⚠️/.test(e.text)), 'tidak ada laporan gagal')
+})
+
+test('runJob: kirim gagal non-koneksi -> TIDAK diulang, dilaporkan, file disimpan', async t => {
+  const dir = await tmpDir(t)
+  const events = []
+  const conn = flakyConn(events, [new Error('media ditolak server WA'), new Error('media ditolak server WA')])
+  const registry = { getEngine: () => fakeEngine(events) }
+  const result = await runDownloadJob({ conn, job: { id: 33, url: 'u', provider: 'pixeldrain', chat: 'c', sender: 'A' }, registry, rootDir: dir, waitForOpen: async () => true })
+  assert.equal(result.kind, 'file')
+  assert.equal(conn.sends, 1, 'error non-koneksi tidak diulang')
+  assert.ok(events.some(e => e.type === 'msg' && /⚠️ Gagal mengirim/.test(e.text)))
+  await fs.access(result.filePath) // file tetap di disk
+})
+
+test('runJob: koneksi tidak pulih -> menyerah sesudah percobaan pertama, dilaporkan', async t => {
+  const dir = await tmpDir(t)
+  const events = []
+  const conn = flakyConn(events, [new Error('Connection Closed'), null])
+  const registry = { getEngine: () => fakeEngine(events) }
+  const result = await runDownloadJob({ conn, job: { id: 34, url: 'u', provider: 'pixeldrain', chat: 'c', sender: 'A' }, registry, rootDir: dir, waitForOpen: async () => false })
+  assert.equal(result.kind, 'file')
+  assert.equal(conn.sends, 1, 'tidak ada percobaan kedua bila koneksi tidak pulih')
+  assert.ok(events.some(e => e.type === 'msg' && /⚠️ Gagal mengirim/.test(e.text)))
+})
+
+test('runJob: percobaan kedua juga gagal -> berhenti di dua percobaan', async t => {
+  const dir = await tmpDir(t)
+  const events = []
+  const conn = flakyConn(events, [new Error('Connection Closed'), new Error('Connection Closed'), new Error('Connection Closed')])
+  const registry = { getEngine: () => fakeEngine(events) }
+  const result = await runDownloadJob({ conn, job: { id: 35, url: 'u', provider: 'pixeldrain', chat: 'c', sender: 'A' }, registry, rootDir: dir, waitForOpen: async () => true })
+  assert.equal(result.kind, 'file')
+  assert.equal(conn.sends, 2, 'maksimal dua percobaan')
+  assert.ok(events.some(e => e.type === 'msg' && /⚠️ Gagal mengirim/.test(e.text)))
+})
+
+test('runJob: oversize putus koneksi -> reservasi BARU diminta untuk pengulangan', async t => {
+  const dir = await tmpDir(t)
+  const events = []
+  const calls = { request: 0, release: [] }
+  const guard = {
+    check: () => ({ allowed: true }),
+    request: async () => { calls.request++; return { granted: true, token: 'tok-' + calls.request } },
+    release: tok => { calls.release.push(tok); return true },
+  }
+  const conn = flakyConn(events, [new Error('Connection Closed')])
+  const registry = { getEngine: () => fakeEngine(events, { size: 30 }) }
+  const result = await runDownloadJob({ conn, job: { id: 32, url: 'u', provider: 'pixeldrain', chat: 'c', sender: 'A' }, registry, rootDir: dir, waMaxBytes: 10, bigSend: guard, waitForOpen: async () => true })
+  assert.equal(result.kind, 'file')
+  assert.equal(conn.sends, 2)
+  assert.equal(calls.request, 2, 'reservasi diminta sekali per percobaan')
+  assert.deepEqual(calls.release, ['tok-1', 'tok-2'], 'token percobaan gagal dilepas; token sukses dilepas sesudah kirim')
+})
+
 // ─── Plugin .download/.dl ────────────────────────────────────────────────────
 
 function dlFixture(t, rootDir) {

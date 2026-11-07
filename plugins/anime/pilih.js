@@ -7,8 +7,11 @@
 // yang lebih besar disimpan ke disk dan jalurnya dilaporkan.
 //
 // Khusus alur ini job memasang linkOnlyIfOversize: bila ukuran SUDAH
-// diketahui dari getInfo dan melewati plafon WA, file TIDAK diunduh sama
-// sekali — yang dikirim hanya link-nya. Sesudah link terkirim, khusus
+// diketahui dari getInfo dan melewati plafon WA, Penjaga Kirim Besar
+// (lib/helpers/sendGuard.js) dipra-cek dulu — penolakan keras berarti
+// file TIDAK diunduh sama sekali, yang dikirim hanya link-nya; selain
+// itu file diunduh dan kirim besarnya diputuskan di titik kirim.
+// Sesudah link terkirim, khusus
 // owner/founder dibuka sesi penawaran (TTL 10 menit): teks persis "y"
 // (tanpa reply, ditangkap handler.before di file ini) mengeksekusi
 // simpan lokal — unduh ke disk tanpa kirim WA — lalu upload ke Google
@@ -18,11 +21,17 @@
 // pengirim itu) tanpa mengunduh apa pun.
 // Kasus provider tanpa engine (🔗) tetap link polos tanpa penawaran:
 // bot memang tidak punya cara mengunduhnya.
+//
+// Akses seluruh keluarga anime diatur gerbang whitelist bersama di
+// lib/helpers/animeFlow.js (assertAnimeAccess): founder/owner bebas;
+// user whitelist (config anime.users) boleh di DM dan di grup whitelist
+// (anime.groups), dengan cooldown 1 menit dan kuota 3 unduhan/hari.
+// Penawaran oversize di bawah ini tetap khusus owner/founder.
 
 import path from 'node:path'
 import fsp from 'node:fs/promises'
 import { runDownloadJob, formatSize } from '#lib/downloader/runJob.js'
-import { getFlow, setFlow, clearFlow, flowKey, advanceFlow, ensureEngines } from '#lib/helpers/animeFlow.js'
+import { getFlow, setFlow, clearFlow, flowKey, advanceFlow, ensureEngines, assertAnimeAccess, reserveAnimeDownload, releaseAnimeDownload, markAnimeUse, saveAnimeUser } from '#lib/helpers/animeFlow.js'
 import { getDriveClient } from '#lib/gdrive/client.js'
 import { syncFileToDrive, defaultTargetFolderId } from '#lib/gdrive/sync.js'
 
@@ -57,6 +66,7 @@ function projectRoot() {
 
 let handler = async (m, ctx) => {
   const { conn, text, usedPrefix, command } = ctx
+  const access = assertAnimeAccess(m, ctx)
   const key = flowKey(m)
   const flow = getFlow(key)
   if (!flow) {
@@ -82,6 +92,10 @@ let handler = async (m, ctx) => {
     return m.reply(step.text)
   }
   // step.type === 'download'
+  // User whitelist: reservasi slot kuota harian + tandai cooldown secara
+  // sinkron sebelum job jalan. Slot dikembalikan bila job gagal atau
+  // hasilnya hanya link (oversize — tidak ada file yang terunduh).
+  if (!access.exempt) { reserveAnimeDownload(ctx.userData); markAnimeUse(ctx.userData) }
   clearFlow(key)
   const job = {
     id: Date.now().toString(36),
@@ -91,14 +105,20 @@ let handler = async (m, ctx) => {
     sender: m.sender,
     senderName: m.pushName || '',
     linkOnlyIfOversize: true,
+    bigSendSurface: 'anime/pilih.js',
   }
   const run = ctx?.runDownloadJob ?? runDownloadJob
   let result
   try {
     result = await run({ conn, job, rootDir: projectRoot() })
   } catch (e) {
+    if (!access.exempt) { releaseAnimeDownload(ctx.userData); await saveAnimeUser() }
     if (e?.code === 'NO_CONN') throw '❌ Koneksi WhatsApp belum siap untuk mengunduh.'
     return m.reply(`❌ Unduhan gagal:\n${e.message || e}`)
+  }
+  if (!access.exempt) {
+    if (!['file', 'media-batch', 'batch'].includes(result?.kind)) releaseAnimeDownload(ctx.userData)
+    await saveAnimeUser()
   }
   // Link terkirim karena oversize: tawarkan simpan lokal — hanya ke
   // owner/founder (cek peran dari konteks pipeline).
@@ -112,7 +132,7 @@ let handler = async (m, ctx) => {
 handler.help = ['pilih <nomor>']
 handler.tags = ['anime']
 handler.command = /^pilih$/i
-handler.founder = true
+handler.bigSend = true
 
 async function defaultUploadToDrive(localPath) {
   const client = globalThis.uptodriveClient ?? getDriveClient({ rootDir: projectRoot() })
@@ -175,6 +195,9 @@ handler.before = async (m, ctx) => {
     chat: m.chat,
     sender: m.sender,
     senderName: m.pushName || '',
+    // Job simpan-lokal penawaran: kontraknya simpan + Drive, BUKAN kirim
+    // ke WA — matikan jalur kirim besar secara eksplisit.
+    bigSendSurface: null,
   }
   let result
   try {

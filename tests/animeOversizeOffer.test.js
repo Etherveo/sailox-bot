@@ -82,6 +82,106 @@ test('runJob linkOnlyIfOversize: ukuran tidak diketahui (null) -> unduh normal',
   assert.ok(events.includes('download'))
 })
 
+// ─── runDownloadJob × Penjaga Kirim Besar ───────────────────────────────────
+// Penjaga diinjeksi sebagai dependensi runDownloadJob (opsi bigSend):
+// di sini tiruan deterministik; logika penjaga sungguhan diuji di
+// tests/sendGuard.test.js dengan dependensi terinjeksi penuh pula.
+
+function stubGuard({ checkResult = { allowed: true }, requestResult = { granted: true, token: 'tok-tes' } } = {}) {
+  const calls = { check: [], request: [], release: [] }
+  return {
+    calls,
+    check: req => { calls.check.push(req); return checkResult },
+    request: async req => { calls.request.push(req); return requestResult },
+    release: token => { calls.release.push(token); return true },
+  }
+}
+function bigEngine(events, fileBytes = 200) {
+  return {
+    async getInfo() { events.push('getInfo'); return { fileName: 'ep01.mp4', size: 500, mimetype: 'video/mp4' } },
+    async download(url, info, { destDir, baseName }) {
+      events.push('download')
+      const filePath = path.join(destDir, baseName + '.mp4')
+      await fs.writeFile(filePath, 'x'.repeat(fileBytes))
+      return { filePath, fileName: 'ep01.mp4', mimetype: 'video/mp4', size: fileBytes }
+    },
+  }
+}
+// fakeConn bawaan file ini tidak merekam opsi sendFile; varian ini iya.
+function optConn(events) {
+  return {
+    sendMessage: async (chat, content) => { events.push({ type: 'msg', text: content.text }); return { key: { id: 's1' } } },
+    sendFile: async (chat, filePath, fileName, caption, quoted, ptt, options) => { events.push({ type: 'file', options }) },
+  }
+}
+
+test('runJob linkOnly + pra-cek penjaga lolos -> file TETAP diunduh', async t => {
+  const dir = await tmpDir(t)
+  const events = []
+  const guard = stubGuard()
+  const registry = { getEngine: () => fakeEngine(events, { size: 500 }) }
+  const result = await runDownloadJob({
+    conn: fakeConn(events),
+    job: { id: 12, url: 'https://pixeldrain.com/u/big', provider: 'pixeldrain', chat: 'c', sender: 'A', linkOnlyIfOversize: true, bigSendSurface: 'anime/pilih.js' },
+    registry, rootDir: dir, waMaxBytes: 100, bigSend: guard,
+  })
+  assert.equal(result.kind, 'file')
+  assert.ok(events.includes('download'), 'pra-cek lolos -> unduh berjalan')
+  assert.equal(guard.calls.check.length, 1)
+  assert.equal(guard.calls.check[0].surface, 'anime/pilih.js')
+  assert.equal(guard.calls.check[0].sizeBytes, 500)
+})
+
+test('runJob linkOnly + pra-cek ditolak keras -> link, tanpa unduh', async t => {
+  const dir = await tmpDir(t)
+  const events = []
+  const guard = stubGuard({ checkResult: { allowed: false, reason: 'mode-founder-only' } })
+  const registry = { getEngine: () => fakeEngine(events, { size: 500 }) }
+  const result = await runDownloadJob({
+    conn: fakeConn(events),
+    job: { id: 14, url: 'https://pixeldrain.com/u/big', provider: 'pixeldrain', chat: 'c', sender: 'U', linkOnlyIfOversize: true, bigSendSurface: 'anime/pilih.js' },
+    registry, rootDir: dir, waMaxBytes: 100, bigSend: guard,
+  })
+  assert.equal(result.kind, 'link')
+  assert.equal(result.reason, 'oversize')
+  assert.ok(!events.includes('download'), 'penolakan keras -> unduh tidak dimulai')
+  assert.equal(guard.calls.request.length, 0)
+})
+
+test('runJob: job simpan-lokal (bigSendSurface null) -> penjaga TIDAK dipanggil, oversize tidak dikirim', async t => {
+  const dir = await tmpDir(t)
+  const events = []
+  const guard = stubGuard()
+  const registry = { getEngine: () => bigEngine(events) }
+  const result = await runDownloadJob({
+    conn: optConn(events),
+    job: { id: 13, url: 'https://pixeldrain.com/u/big', provider: 'pixeldrain', chat: 'c', sender: 'A', bigSendSurface: null },
+    registry, rootDir: dir, waMaxBytes: 100, bigSend: guard,
+  })
+  assert.equal(result.kind, 'file')
+  assert.equal(guard.calls.request.length, 0, 'job simpan-lokal tidak boleh meminta reservasi')
+  assert.ok(!events.some(e => e.type === 'file'), 'sendFile tidak boleh dipanggil untuk job simpan-lokal')
+})
+
+test('runJob: job .dl biasa -> oversize dikirim dengan token reservasi dari penjaga', async t => {
+  const dir = await tmpDir(t)
+  const events = []
+  const guard = stubGuard()
+  const registry = { getEngine: () => bigEngine(events) }
+  const result = await runDownloadJob({
+    conn: optConn(events),
+    job: { id: 15, url: 'https://pixeldrain.com/u/big', provider: 'pixeldrain', chat: 'c', sender: 'A' },
+    registry, rootDir: dir, waMaxBytes: 100, bigSend: guard,
+  })
+  assert.equal(result.kind, 'file')
+  const fileEvent = events.find(e => e.type === 'file')
+  assert.ok(fileEvent, 'sendFile terpanggil')
+  assert.equal(guard.calls.request.length, 1)
+  assert.equal(guard.calls.request[0].surface, 'downloader/download.js', 'bawaan permukaan job antrean = .dl')
+  assert.equal(fileEvent.options?.reservation, 'tok-tes', 'kirim membawa token reservasi penjaga')
+  assert.deepEqual(guard.calls.release, ['tok-tes'], 'reservasi dilepas sesudah kirim')
+})
+
 // ─── Store penawaran ────────────────────────────────────────────────────────
 
 test('oversize offer store: put/get/delete + kedaluwarsa malas', () => {
@@ -130,24 +230,34 @@ test('pilih: hasil link-oversize -> penawaran dibuka untuk founder + teks tawara
   }
   await pilihHandler(m, ctx)
   assert.equal(seenJob.linkOnlyIfOversize, true, 'job alur anime memasang flag')
+  assert.equal(seenJob.bigSendSurface, 'anime/pilih.js', 'job alur anime memasang permukaan kirim besarnya')
   assert.equal(store.get(m.chat, m.sender)?.provider, 'pixeldrain')
   assert.ok(m.replies.includes(OVERSIZE_OFFER_TEXT))
   clearFlow(flowKey(m))
 })
 
-test('pilih: hasil link-oversize untuk NON-owner -> tidak ada penawaran', async () => {
-  const m = fakeMsg()
-  seedProvidersFlow(m)
-  const store = createOversizeOfferStore()
-  const ctx = {
-    conn: fakeConn([]), text: '1', usedPrefix: '.', command: 'pilih', isFounder: false, isOwner: false,
-    oversizeOffers: store,
-    runDownloadJob: async ({ job }) => ({ kind: 'link', reason: 'oversize', provider: job.provider, url: job.url, fileName: 'ep01.mp4', size: 999 }),
+test('pilih: hasil link-oversize untuk user whitelist NON-owner -> tidak ada penawaran', async () => {
+  // Sejak gerbang whitelist (2026-11-05) user non-owner harus masuk
+  // anime.users dulu supaya handler jalan; penawaran tetap khusus
+  // owner/founder, jadi untuk user whitelist pun tidak boleh muncul.
+  const prevAnime = globalThis.anime
+  globalThis.anime = { users: ['62823'], groups: [] }
+  try {
+    const m = fakeMsg()
+    seedProvidersFlow(m)
+    const store = createOversizeOfferStore()
+    const ctx = {
+      conn: fakeConn([]), text: '1', usedPrefix: '.', command: 'pilih', isFounder: false, isOwner: false,
+      oversizeOffers: store,
+      runDownloadJob: async ({ job }) => ({ kind: 'link', reason: 'oversize', provider: job.provider, url: job.url, fileName: 'ep01.mp4', size: 999 }),
+    }
+    await pilihHandler(m, ctx)
+    assert.equal(store.get(m.chat, m.sender), null)
+    assert.ok(!m.replies.includes(OVERSIZE_OFFER_TEXT))
+    clearFlow(flowKey(m))
+  } finally {
+    if (prevAnime === undefined) delete globalThis.anime; else globalThis.anime = prevAnime
   }
-  await pilihHandler(m, ctx)
-  assert.equal(store.get(m.chat, m.sender), null)
-  assert.ok(!m.replies.includes(OVERSIZE_OFFER_TEXT))
-  clearFlow(flowKey(m))
 })
 
 // ─── handler.before: eksekusi "y" ───────────────────────────────────────────
@@ -161,6 +271,7 @@ test('before: "y" dari owner mengeksekusi simpan lokal (tanpa flag), sesi ditutu
   assert.equal(await pilihHandler.before(m, ctx), true)
   assert.equal(seenJob.provider, 'pixeldrain')
   assert.equal(seenJob.linkOnlyIfOversize, undefined, 'job simpan lokal TIDAK memasang flag link-only')
+  assert.equal(seenJob.bigSendSurface, null, 'job simpan lokal menonaktifkan kirim besar secara eksplisit')
   assert.equal(store.get('c1', 'A'), null, 'sesi sekali pakai')
   assert.match(m.replies.at(-1), /tidak ditemukan di disk/, 'tanpa filePath hasil -> upload dilewati dengan penjelasan')
 })

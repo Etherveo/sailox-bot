@@ -71,6 +71,24 @@ export const tiktokFollowup = createTiktokFollowupStore()
 // disimpan seperti .dl/.unduh.
 export const TT_WA_MAX_BYTES = 150 * 1024 * 1024
 
+// Ambang gerbang dokumen video .tt (lihat catatan GERBANG DOKUMEN di
+// bawah): video yang ukuran unduhannya melewati ini dikirim sebagai
+// dokumen, bukan video inline.
+export const TT_VIDEO_INLINE_MAX_BYTES = 25 * 1024 * 1024
+const TT_VIDEO_EXTS = new Set(['mp4', 'mkv', 'mov', 'webm', 'm4v'])
+
+// Opsi kirim untuk satu media .tt yang sudah terunduh: { asDocument: true }
+// hanya untuk VIDEO yang ukurannya melewati ambang; selain itu {} (kirim
+// seperti biasa). Ukuran diambil dari hasil engine.download; bila engine
+// tidak melaporkannya (null), ukur file-nya langsung dari disk.
+export async function ttSendOptions(downloaded, waFileName) {
+  const ext = String(waFileName || downloaded?.fileName || '').split('.').pop()?.toLowerCase()
+  const isVideo = String(downloaded?.mimetype || '').startsWith('video/') || TT_VIDEO_EXTS.has(ext)
+  if (!isVideo) return {}
+  const size = Number.isFinite(downloaded?.size) ? downloaded.size : (await fs.stat(downloaded.filePath)).size
+  return size > TT_VIDEO_INLINE_MAX_BYTES ? { asDocument: true } : {}
+}
+
 function projectRoot() {
   const pluginsRoot = global.pluginLoader?.root
   return pluginsRoot ? path.resolve(pluginsRoot, '..') : process.cwd()
@@ -80,6 +98,15 @@ function projectRoot() {
 // (gitignored, seperti .dl) lalu kembalikan hasil engine.download.
 // Folder tmp dihapus pemanggil setelah sendFile selesai — baik sukses
 // maupun gagal kirim — supaya tidak menumpuk.
+//
+// GERBANG DOKUMEN 2026-11-05 (permintaan Veo; kasus live: follow-up HD
+// 94 MB terkirim sebagai video inline): video .tt yang ukuran file
+// unduhannya melewati TT_VIDEO_INLINE_MAX_BYTES (25 MB) dikirim sebagai
+// DOKUMEN lewat opsi asDocument sendFile — berlaku untuk video pertama
+// (SD/HD) maupun follow-up 'hd', karena keduanya lewat sendMediaFromUrl
+// yang sama. Di bawah ambang tetap video inline seperti niat awal .tt.
+// Foto dan audio tidak kena gerbang ini. (.dl tidak berubah: runJob
+// memang sudah mengirim semua video sebagai dokumen.)
 async function downloadMediaToTmp(url, waFileName, root) {
   const providerDir = await ensureProviderDir(root, 'tiktok')
   const dir = path.join(providerDir, `tt-${Date.now()}-${randomUUID().slice(0, 8)}`)
@@ -99,7 +126,8 @@ async function downloadMediaToTmp(url, waFileName, root) {
 async function sendMediaFromUrl(conn, chat, url, waFileName, caption, quoted, root) {
   const downloaded = await downloadMediaToTmp(url, waFileName, root)
   try {
-    await conn.sendFile(chat, downloaded.filePath, waFileName, caption, quoted)
+    const options = await ttSendOptions(downloaded, waFileName)
+    await conn.sendFile(chat, downloaded.filePath, waFileName, caption, quoted, false, options)
   } finally {
     await fs.rm(path.dirname(downloaded.filePath), { recursive: true, force: true }).catch(() => {})
   }

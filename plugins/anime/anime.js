@@ -7,9 +7,12 @@
 // atau link episode terpisah seperti alur .unduh manual.
 
 import { fetchAnimeDetail } from '#lib/kuramanime/catalog.js'
-import { setFlow, flowKey, formatEpisodesView, openEpisodeFlow, ensureEngines } from '#lib/helpers/animeFlow.js'
+import { setFlow, flowKey, formatEpisodesView, openEpisodeFlow, ensureEngines, assertAnimeAccess, assertAnimeCooldown, markAnimeUse, saveAnimeUser } from '#lib/helpers/animeFlow.js'
 
-let handler = async (m, { text, usedPrefix, command }) => {
+let handler = async (m, ctx) => {
+  const { text, usedPrefix, command } = ctx
+  const access = assertAnimeAccess(m, ctx)
+  if (!access.exempt) assertAnimeCooldown(ctx.userData)
   const url = String(text || '').trim().split(/\s+/)[0]
   if (!url) {
     throw (
@@ -27,7 +30,7 @@ let handler = async (m, { text, usedPrefix, command }) => {
   try {
     if (/\/(episode|batch)\//i.test(parsed.pathname)) {
       const res = await openEpisodeFlow(url)
-      if (res.flow) setFlow(flowKey(m), res.flow)
+      if (res.flow) { setFlow(flowKey(m), res.flow); if (!access.exempt) { markAnimeUse(ctx.userData); await saveAnimeUser() } }
       return m.reply(res.text)
     }
     // Link detail anime -> daftar episode/batch
@@ -38,6 +41,7 @@ let handler = async (m, { text, usedPrefix, command }) => {
     ]
     if (!combined.length) return m.reply(`🎬 *${detail.title || 'Anime'}*\n\nBelum ada episode/batch tersedia untuk judul ini.`)
     setFlow(flowKey(m), { stage: 'episodes', title: detail.title, items: combined })
+    if (!access.exempt) { markAnimeUse(ctx.userData); await saveAnimeUser() }
     return m.reply(formatEpisodesView({ ...detail, _combined: combined }))
   } catch (e) {
     throw `❌ Gagal membuka link:\n${e.message || e}`
@@ -47,6 +51,5 @@ let handler = async (m, { text, usedPrefix, command }) => {
 handler.help = ['anime <link episode/detail kuramanime>']
 handler.tags = ['anime']
 handler.command = /^anime$/i
-handler.founder = true
 
 export default handler

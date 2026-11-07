@@ -7,9 +7,12 @@
 // Format: .carianime <judul> [halaman]
 
 import { searchAnime } from '#lib/kuramanime/catalog.js'
-import { setFlow, flowKey, formatSearchView } from '#lib/helpers/animeFlow.js'
+import { setFlow, flowKey, formatSearchView, assertAnimeAccess, assertAnimeCooldown, markAnimeUse, saveAnimeUser } from '#lib/helpers/animeFlow.js'
 
-let handler = async (m, { text, usedPrefix, command }) => {
+let handler = async (m, ctx) => {
+  const { text, usedPrefix, command } = ctx
+  const access = assertAnimeAccess(m, ctx)
+  if (!access.exempt) assertAnimeCooldown(ctx.userData)
   const raw = String(text || '').trim()
   if (!raw) throw `🔍 Contoh: ${usedPrefix + command} li xiongmao`
   let keyword = raw
@@ -27,12 +30,12 @@ let handler = async (m, { text, usedPrefix, command }) => {
   }
   if (!result.items.length) return m.reply(`🔍 Tidak ada hasil untuk "${keyword}". Coba kata kunci lain.`)
   setFlow(flowKey(m), { stage: 'search', items: result.items })
+  if (!access.exempt) { markAnimeUse(ctx.userData); await saveAnimeUser() }
   return m.reply(formatSearchView(keyword, result))
 }
 
 handler.help = ['carianime <judul> [halaman]']
 handler.tags = ['anime']
 handler.command = /^carianime$/i
-handler.founder = true
 
 export default handler

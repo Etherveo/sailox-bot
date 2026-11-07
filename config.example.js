@@ -33,6 +33,7 @@ global.bots = {
   maxPlugins: 30, maxPluginKB: 64, maxDiskMB: 100,
   outbound: { perChatMs: 1200, perSecond: 3 }, allowedPackages: [], logRelay: 'masked',
 }
+global.anime = { users: [], groups: [] }
 global.legacyAliases = true
 global.APIs = {}
 global.APIKeys = {}

@@ -189,6 +189,85 @@ test('plugin getfile mengirim dokumen & carifile menemukan isi', async t => {
   assert.match(replies.at(-1), /data\.json/)
 })
 
+// --- .getfile × Penjaga Kirim Besar (fase 2, 2026-11-06) ---
+// Penjaga diinjeksi lewat globalThis.sendGuard (pola yang sama seperti
+// global.fileOps); file besar dibuat SPARSE (truncate) — yang diuji
+// keputusan penjaga + jalur kirimnya, bukan isi byte-nya.
+function stubBigGuard({ deny = null } = {}) {
+  const calls = { request: [], release: [] }
+  let n = 0
+  return {
+    calls,
+    request: async req => { calls.request.push(req); if (deny) return { granted: false, reason: deny }; n++; return { granted: true, token: 'tok-' + n } },
+    release: tok => { calls.release.push(tok); return true },
+  }
+}
+
+async function setupBigGetfile(t, { guard, sendFileImpl } = {}) {
+  const { root, ops } = await setup(t)
+  global.fileOps = ops
+  globalThis.sendGuard = guard
+  t.after(() => { delete global.fileOps; delete globalThis.sendGuard })
+  const bigPath = path.join(root, 'big.mp4')
+  await fs.writeFile(bigPath, '')
+  await fs.truncate(bigPath, 160 * 1024 * 1024)
+  const sent = [], files = [], replies = []
+  const conn = {
+    role: 'main',
+    identity: { roleOf: () => ({ isFounder: true }) },
+    sendMessage: async (chat, content) => { sent.push(content) },
+    sendFile: async (chat, filePath, fileName, caption, quoted, ptt, options) => { files.push({ filePath, fileName, options }); if (sendFileImpl) await sendFileImpl(files.length) },
+  }
+  const m = { chat: 'tes@s.whatsapp.net', sender: '6282348181097@s.whatsapp.net', reply: async teks => { replies.push(String(teks)) } }
+  const ctx = { conn, command: 'getfile', text: 'big.mp4', args: ['big.mp4'], usedPrefix: '.' }
+  return { root, conn, m, ctx, sent, files, replies }
+}
+
+test('plugin getfile: file >150 MB berangkat dengan reservasi penjaga sebagai dokumen', async t => {
+  const guard = stubBigGuard()
+  const { m, ctx, files, sent } = await setupBigGetfile(t, { guard })
+  await getfileHandler(m, ctx)
+  assert.equal(guard.calls.request.length, 1)
+  assert.equal(guard.calls.request[0].surface, 'owner/getfile.js')
+  assert.equal(guard.calls.request[0].sizeBytes, 160 * 1024 * 1024)
+  assert.equal(files.length, 1)
+  assert.equal(files[0].fileName, 'big.mp4')
+  assert.equal(files[0].options.asDocument, true)
+  assert.equal(files[0].options.reservation, 'tok-1')
+  assert.deepEqual(guard.calls.release, ['tok-1'], 'reservasi dilepas sesudah kirim')
+  assert.equal(sent.length, 0, 'tidak lewat jalur dokumen buffer lama')
+})
+
+test('plugin getfile: penjaga menolak -> error menyebut alasannya, tidak ada pengiriman', async t => {
+  const guard = stubBigGuard({ deny: 'mode-off' })
+  const { m, ctx, files } = await setupBigGetfile(t, { guard })
+  await assert.rejects(getfileHandler(m, ctx), /Penjaga Kirim Besar menolak \(mode-off\)/)
+  assert.equal(files.length, 0)
+})
+
+test('plugin getfile: kirim besar putus koneksi -> reservasi baru + diulang sekali', async t => {
+  const guard = stubBigGuard()
+  const { m, ctx, files, conn } = await setupBigGetfile(t, {
+    guard,
+    sendFileImpl: async n => { if (n === 1) throw new Error('Connection Closed') },
+  })
+  // Koneksi "pulih" sesaat sesudah pesan 🔁 terkirim (event open
+  // dipancarkan 10 ms kemudian, sesudah penunggu berlangganan).
+  const listeners = new Set()
+  conn.ev = { on: (e, f) => listeners.add(f), off: (e, f) => listeners.delete(f) }
+  conn.ws = { readyState: 3 }
+  const baseSend = conn.sendMessage
+  conn.sendMessage = async (chat, content) => {
+    await baseSend(chat, content)
+    if (/🔁/.test(content.text ?? '')) setTimeout(() => listeners.forEach(f => f({ connection: 'open' })), 10)
+  }
+  await getfileHandler(m, ctx)
+  assert.equal(files.length, 2, 'pengiriman dicoba dua kali')
+  assert.equal(files[1].options.reservation, 'tok-2', 'percobaan kedua memakai reservasi baru')
+  assert.equal(guard.calls.request.length, 2)
+  assert.deepEqual(guard.calls.release, ['tok-1', 'tok-2'])
+})
+
 test('regex command plugin file tidak bertabrakan satu sama lain', () => {
   const cmds = { cd: cdHandler.command, ls: lsHandler.command, rf: readfileHandler.command, ef: editfileHandler.command, cf: carifileHandler.command }
   assert.match('cd', cmds.cd); assert.match('ls', cmds.ls); assert.match('dir', cmds.ls)

@@ -5,8 +5,7 @@ import {
   supportedProviders,
   downloaderRegistry,
   getDownloadQueue,
-  attachDownloadProcessor,
-  runDownloadJob,
+  ensureJobProcessor,
   providerLabel,
   attachEngineNotifierWithConn
 } from '#lib/downloader/index.js'
@@ -36,8 +35,6 @@ const QUIET_PROVIDERS = new Set(['facebook', 'instagram', 'tiktok'])
 // lib/downloader/runJob.js), jadi metadata platform tanpa caption tidak
 // tertahan menunggu file selesai.
 
-let activeConn = null
-
 function projectRoot() {
   const pluginsRoot = global.pluginLoader?.root
   return pluginsRoot ? path.resolve(pluginsRoot, '..') : process.cwd()
@@ -66,28 +63,14 @@ export function extractDownloadUrl(...texts) {
 let handler = async (m, ctx) => {
   const { conn, text, usedPrefix, command } = ctx
   await ensureEngines()
-  activeConn = conn
   attachEngineNotifierWithConn(conn)
 
   const registry = ctx.downloaderRegistry ?? downloaderRegistry
   const rootDir = projectRoot()
   const queue = ctx.downloadQueue ?? getDownloadQueue(rootDir)
-  // Pasang/segarkan prosesor antrean dengan conn & registry terbaru.
-  // Bidang job yang berubah setelah enqueue (khususnya kunci pesan posisi
-  // antrean) dibaca ulang dari file antrean sesaat sebelum diproses, agar
-  // prosesor tidak memegang salinan job yang kedaluwarsa.
-  attachDownloadProcessor(async job => {
-    let fresh = job
-    try {
-      const snap = await queue.snapshot()
-      const found = snap.jobs.find(j => j.id === job.id)
-      if (found) fresh = { ...job, userMsgKey: found.userMsgKey ?? job.userMsgKey, queueNoticeKey: found.queueNoticeKey ?? job.queueNoticeKey }
-    } catch { /* pakai salinan job apa adanya */ }
-    const getJobState = async id => {
-      try { return (await queue.snapshot()).jobs.find(j => j.id === id) ?? null } catch { return null }
-    }
-    return runDownloadJob({ conn: activeConn, job: fresh, registry, rootDir, getJobState })
-  })
+  // Pasang/segarkan prosesor antrean dengan conn & registry terbaru
+  // (kabelnya dipakai bersama .animedownload — lib/downloader/processor.js).
+  ensureJobProcessor({ conn, queue, registry, rootDir })
 
   // Daftar provider dalam bentuk per baris (bukan koma) supaya mudah
   // dibaca di chat — permintaan pemilik 2026-10-25.
@@ -167,5 +150,6 @@ let handler = async (m, ctx) => {
 handler.help = ['download <link> / balas pesan berisi link', 'dl antrean', 'dl batal <id>']
 handler.tags = ['downloader']
 handler.command = /^(download|dl)$/i
+handler.bigSend = true
 
 export default handler

@@ -188,6 +188,14 @@ test('runJob: single video → asDocument, single foto → tanpa asDocument', as
   const eventsI = []
   await runDownloadJob({ conn: fakeConn(eventsI), job: { id: 22, url: 'https://x.test/foto.jpg', provider: 'pixeldrain', chat: 'c', sender: 'A' }, registry: { getEngine: () => mkEngine('foto.jpg', 'image/jpeg') }, rootDir: dir, pickStore: createPickSessionStore() })
   assert.equal(eventsI.find(e => e.file === 'foto.jpg')?.options?.asDocument, undefined, 'foto tetap image')
+  // Pengecualian pemilik 2026-11-07: video Facebook & Instagram
+  // dikirim sebagai pesan video (inline), bukan dokumen.
+  const eventsF = []
+  await runDownloadJob({ conn: fakeConn(eventsF), job: { id: 23, url: 'https://www.facebook.com/watch?v=1', provider: 'facebook', chat: 'c', sender: 'A' }, registry: { getEngine: () => mkEngine('facebook-1.mp4', 'video/mp4') }, rootDir: dir, pickStore: createPickSessionStore() })
+  assert.equal(eventsF.find(e => e.file === 'facebook-1.mp4')?.options?.asDocument, undefined, 'video facebook inline, tanpa asDocument')
+  const eventsG = []
+  await runDownloadJob({ conn: fakeConn(eventsG), job: { id: 24, url: 'https://www.instagram.com/reel/x/', provider: 'instagram', chat: 'c', sender: 'A' }, registry: { getEngine: () => mkEngine('instagram-1.mp4', 'video/mp4') }, rootDir: dir, pickStore: createPickSessionStore() })
+  assert.equal(eventsG.find(e => e.file === 'instagram-1.mp4')?.options?.asDocument, undefined, 'video instagram inline, tanpa asDocument')
 })
 
 // ─── runJob: batch ──────────────────────────────────────────────────────────

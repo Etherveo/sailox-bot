@@ -265,6 +265,86 @@ test('unduh: file di atas plafon WA tidak dikirim, jalur disk dilaporkan', async
   assert.match(conn.sent.at(-1), /src/)
 })
 
+// ─── unduh: baris info + laporan mempra-cek Penjaga Kirim Besar ─────────────
+// Regresi 2026-11-06: baris info memvonis "Tidak bisa — melebihi batas
+// 150 MB" dari plafon mentah tanpa menanya penjaga, padahal founder
+// bisa mengirim sampai 1 GB. Sekarang info mempra-cek (checkBigSend).
+const BIG_SIZE = 151 * 1024 * 1024
+function bigEngineStopAfterInfo() {
+  return {
+    id: 'fakehost',
+    match: url => String(url).includes('fakehost.test'),
+    getInfo: async () => ({ fileName: 'besar.bin', size: BIG_SIZE, fileUrl: 'https://fakehost.test/big' }),
+    download: async () => { throw new Error('berhenti sesudah info (tes)') },
+  }
+}
+function founderConn() {
+  const c = fakeConn()
+  c.identity = { roleOf: () => ({ isFounder: true }) }
+  return c
+}
+function entitleUnduh() {
+  global.pluginLoader = { ...global.pluginLoader, get: s => (s === 'downloader/unduh.js' ? unduhHandler : undefined) }
+}
+
+test('unduh: info file besar founder yang lolos pra-cek -> "Ya (lewat Penjaga Kirim Besar)"', async t => {
+  await setupUnduh(t, bigEngineStopAfterInfo())
+  entitleUnduh()
+  const conn = founderConn()
+  const m = fakeM()
+  await unduhHandler(m, { conn, text: 'https://fakehost.test/big', usedPrefix: '.', command: 'u' })
+  assert.match(conn.sent[0], /Kirim ke WA: Ya \(lewat Penjaga Kirim Besar\)/)
+  assert.doesNotMatch(conn.sent[0], /Tidak bisa/)
+})
+
+test('unduh: info file besar saat penjaga menolak keras -> alasannya disebut di muka', async t => {
+  await setupUnduh(t, bigEngineStopAfterInfo())
+  entitleUnduh()
+  globalThis.bigsend = { mode: 'off' }
+  t.after(() => { delete globalThis.bigsend })
+  const conn = founderConn()
+  const m = fakeM()
+  await unduhHandler(m, { conn, text: 'https://fakehost.test/big', usedPrefix: '.', command: 'u' })
+  assert.match(conn.sent[0], /Tidak bisa — Penjaga Kirim Besar menolak \(mode-off\)/)
+})
+
+test('unduh: kirim besar gagal di titik kirim -> laporan menyebut pengiriman gagal, bukan plafon', async t => {
+  const fakeEngine = {
+    id: 'fakehost',
+    match: url => String(url).includes('fakehost.test'),
+    getInfo: async () => ({ fileName: 'besar.bin', size: BIG_SIZE, fileUrl: 'https://fakehost.test/big' }),
+    download: async (url, info, { destDir }) => {
+      const filePath = path.join(destDir, 'besar.bin')
+      const fh = await fs.open(filePath, 'w')
+      await fh.truncate(BIG_SIZE)
+      await fh.close()
+      return { filePath, fileName: 'besar.bin', mimetype: 'application/octet-stream', size: BIG_SIZE }
+    },
+  }
+  await setupUnduh(t, fakeEngine)
+  entitleUnduh()
+  // Tes ini memakai penjaga ASLI (reservasi sungguhan): pulihkan file
+  // penanda src/private/send-guard.json ke keadaan semula sesudahnya —
+  // tulis penanda dari proses tes bersifat async dan sapuan berkala
+  // penjaga tidak berjalan di proses tes, jadi sisa entri bisa tertinggal
+  // dan terbaca bot live sebagai "mati di tengah kirim besar".
+  const markerPath = path.join(process.cwd(), 'src', 'private', 'send-guard.json')
+  const markerBefore = await fs.readFile(markerPath, 'utf8').catch(() => null)
+  t.after(async () => {
+    if (markerBefore == null) await fs.rm(markerPath, { force: true }).catch(() => {})
+    else await fs.writeFile(markerPath, markerBefore).catch(() => {})
+  })
+  const conn = founderConn()
+  let sendAttempts = 0
+  conn.sendFile = async () => { sendAttempts++; throw new Error('media ditolak server WA') }
+  const m = fakeM()
+  await unduhHandler(m, { conn, text: 'https://fakehost.test/big', usedPrefix: '.', command: 'u' })
+  assert.equal(sendAttempts, 1, 'error non-koneksi tidak diulang')
+  assert.ok(conn.sent.some(s => /⚠️ Gagal mengirim/.test(s)))
+  assert.match(conn.sent.at(-1), /Tidak dikirim ke WA: pengiriman gagal/)
+  assert.doesNotMatch(conn.sent.at(-1), /melebihi batas/)
+})
+
 test('unduh: list tanpa item menampilkan daftar, bukan mengunduh', async t => {
   const fakeEngine = {
     id: 'fakehost',

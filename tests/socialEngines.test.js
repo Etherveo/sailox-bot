@@ -83,11 +83,42 @@ test('tiktok: adaptasi legacy downloader-tiktok.js — savetik dulu, tikwm fallb
   await assert.rejects(() => tiktok.getInfo('https://vt.tiktok.com/abc/', { fetchFn: deadFetch }))
 })
 
-test('facebook: tautan TERAKHIR dari resolver dipilih (aturan legacy)', async () => {
-  const html = `<a class="btn" href="https://cdn/360.mp4">360</a><a class="btn" href="https://cdn/720.mp4">720</a><a class="btn" href="https://cdn/hd-final.mp4">HD</a>`
-  const info = await facebook.getInfo('https://www.facebook.com/watch?v=123456', { fetchFn: instaFetch(html) })
-  assert.equal(info.downloadUrl, 'https://cdn/hd-final.mp4')
+function fbdlFetch(html, { headSize = '555' } = {}) {
+  return async (url, opts = {}) => {
+    const u = String(url)
+    if (u.includes('fbdownloader.to/api/ajaxSearch')) return Response.json({ status: 'ok', data: html })
+    if (opts.method === 'HEAD') return new Response(null, { status: 200, headers: { 'content-length': headSize, 'content-type': 'video/mp4' } })
+    return new Response('media-bytes', { status: 200, headers: { 'content-type': 'video/mp4' } })
+  }
+}
+
+const FBDL_TABLE = `<div class="detail"><h3>Judul Tes</h3></div><table class="table"><tbody>
+<tr><td class="video-quality">360p</td><td><a class="download-link-fb" href="https://cdn/360.mp4">unduh</a></td></tr>
+<tr><td class="video-quality">720p (HD)</td><td><a class="download-link-fb" href="https://cdn/720.mp4">unduh</a></td></tr>
+<tr><td class="video-quality">Audio</td><td><button data-videourl="https://cdn/audio.mp3">unduh</button></td></tr>
+</tbody></table>`
+
+test('facebook: port scraper yue (fbdownloader.to) — baris 720p dipilih, baris pertama cadangan', async () => {
+  const info = await facebook.getInfo('https://www.facebook.com/watch?v=123456', { fetchFn: fbdlFetch(FBDL_TABLE) })
+  assert.equal(info.downloadUrl, 'https://cdn/720.mp4')
   assert.equal(info.fileName, 'facebook-123456.mp4')
+  assert.equal(info.size, 555, 'ukuran dari HEAD CDN')
+
+  const noHd = `<table class="table"><tbody>
+  <tr><td class="video-quality">360p</td><td><a class="download-link-fb" href="https://cdn/360.mp4">unduh</a></td></tr>
+  </tbody></table>`
+  const info2 = await facebook.getInfo('https://www.facebook.com/watch?v=123456', { fetchFn: fbdlFetch(noHd) })
+  assert.equal(info2.downloadUrl, 'https://cdn/360.mp4', 'tanpa 720p, baris pertama diambil')
+
+  const rows = facebook.parseFbDownloaderRows(FBDL_TABLE)
+  assert.equal(rows.length, 3)
+  assert.equal(rows[2].url, 'https://cdn/audio.mp3', 'tautan cadangan dari button data-videourl terbaca')
+
+  const failFetch = async () => Response.json({ status: 'error' })
+  await assert.rejects(
+    () => facebook.getInfo('https://www.facebook.com/watch?v=123456', { fetchFn: failFetch }),
+    /Gagal mengambil data dari fbdownloader\.to/
+  )
   assert.equal(facebook.match('https://fb.watch/abc/'), true)
   assert.equal(facebook.match('https://facebook.com.evil.test/x'), false)
 })
