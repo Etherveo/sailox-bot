@@ -1,4 +1,4 @@
-import { CONFIG_REGISTRY, listConfig, setConfig, deleteConfig, formatConfigValue } from '#lib/helpers/configStore.js'
+import { CONFIG_REGISTRY, CONFIG_CATEGORIES, listConfig, setConfig, deleteConfig, formatConfigValue, groupConfigRows, resolveConfigCategory } from '#lib/helpers/configStore.js'
 
 // Perintah .config — CRUD konfigurasi runtime khusus founder.
 // Create/Update: set (membuat atau menimpa override), Read: list/get,
@@ -8,7 +8,9 @@ import { CONFIG_REGISTRY, listConfig, setConfig, deleteConfig, formatConfigValue
 // Logika perintah tinggal di sini sejak refactor aturan arsitektur
 // 2026-10-28 (sebelumnya lib/helpers/configCommands.js — plugin lama
 // hanya pembungkus 7 baris yang meneruskan ke helper).
-const USAGE = 'Gunakan:\n.config list\n.config get <key>\n.config set <key> <nilai>\n.config del <key>'
+const USAGE = 'Gunakan:\n.config list [kategori]\n.config get <key>\n.config set <key> <nilai>\n.config del <key>'
+const CATEGORY_IDS = CONFIG_CATEGORIES.map(c => c.id).join('|')
+const rowLine = r => `• ${r.key} = ${formatConfigValue(r.value)}${r.stored ? ' (json)' : ''}`
 
 export async function configCommand(m, { text }) {
   const db = global.db
@@ -19,8 +21,17 @@ export async function configCommand(m, { text }) {
     const key = tokens[1]?.[0]
     if (sub === 'list') {
       const rows = listConfig(db)
-      const body = rows.map(r => `• ${r.key} = ${formatConfigValue(r.value)}${r.stored ? ' (json)' : ''}`).join('\n')
-      await m.reply(`*Konfigurasi runtime*\n${body}\n\n(json) = override tersimpan di databases/config.json; tanpa tanda = nilai config.js.\nUbah: .config set <key> <nilai> · Hapus override: .config del <key>\nKunci identitas & rahasia (founder/owner/pairing/API) tidak dikelola dari chat.`)
+      const groups = groupConfigRows(rows)
+      const wanted = tokens[1]?.[0]
+      if (wanted) {
+        const catId = resolveConfigCategory(wanted)
+        if (!catId) throw `Kategori tidak dikenal: ${wanted}. Pilihan: ${CATEGORY_IDS}`
+        const group = groups.find(g => g.id === catId)
+        await m.reply(`*Konfigurasi — ${group.label}*\n${group.rows.map(rowLine).join('\n')}\n\n(json) = override tersimpan di databases/config.json; tanpa tanda = nilai config.js.\nSemua kategori: .config list`)
+      } else {
+        const body = groups.map(g => `*${g.label}*\n${g.rows.map(rowLine).join('\n')}`).join('\n\n')
+        await m.reply(`*Konfigurasi runtime*\n\n${body}\n\n(json) = override tersimpan di databases/config.json; tanpa tanda = nilai config.js.\nUbah: .config set <key> <nilai> · Hapus override: .config del <key>\nSatu kategori: .config list <${CATEGORY_IDS}>\nKunci identitas & rahasia (founder/owner/pairing/API) tidak dikelola dari chat.`)
+      }
     } else if (sub === 'get') {
       if (!key || !CONFIG_REGISTRY[key]) throw `Kunci tidak dikenal. ${USAGE}`
       const row = listConfig(db).find(r => r.key === key)

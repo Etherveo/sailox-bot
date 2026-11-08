@@ -4,7 +4,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import os from 'node:os'
 import { Database } from '../lib/database/engine.js'
-import { applyStoredConfig, setConfig, deleteConfig, listConfig, coerceConfigValue } from '../lib/helpers/configStore.js'
+import { CONFIG_REGISTRY, applyStoredConfig, setConfig, deleteConfig, listConfig, coerceConfigValue, configCategoryOf, resolveConfigCategory, groupConfigRows } from '../lib/helpers/configStore.js'
 import configHandler, { configCommand } from '../plugins/owner/config.js'
 
 const GLOBAL_KEYS = ['logPrivacy', 'bots', 'prefix', 'defaultLimit']
@@ -125,4 +125,61 @@ test('coerce: kunci chat Ryn — rynScope/rynUsers enum, rynGroups list JID', ()
   assert.deepEqual(coerceConfigValue('rynGroups', '120363111@g.us, 120363222@g.us'), ['120363111@g.us', '120363222@g.us'])
   assert.deepEqual(coerceConfigValue('rynGroups', ''), [])
   assert.throws(() => coerceConfigValue('rynGroups', 'bukan-jid'), /JID grup tidak valid/)
+})
+
+test('kategori config: prefix namespace + peta eksplisit, semua kunci terklasifikasi', () => {
+  assert.equal(configCategoryOf('bots.enabled'), 'jadibot')
+  assert.equal(configCategoryOf('bots.allowedPackages'), 'jadibot')
+  assert.equal(configCategoryOf('bigsend.mode'), 'bigsend')
+  assert.equal(configCategoryOf('anime.users'), 'anime')
+  assert.equal(configCategoryOf('kdriveMode'), 'kdrive')
+  assert.equal(configCategoryOf('kdrivePeer'), 'kdrive')
+  assert.equal(configCategoryOf('bridge'), 'ryn')
+  assert.equal(configCategoryOf('rynScope'), 'ryn')
+  assert.equal(configCategoryOf('rynTriggerMention'), 'ryn')
+  assert.equal(configCategoryOf('prefix'), 'umum')
+  assert.equal(configCategoryOf('logPrivacy'), 'umum')
+  assert.equal(configCategoryOf('botChannel'), 'umum')
+  const ids = new Set(['umum', 'jadibot', 'bigsend', 'anime', 'kdrive', 'ryn'])
+  for (const key of Object.keys(CONFIG_REGISTRY)) assert.ok(ids.has(configCategoryOf(key)), `kategori valid untuk ${key}`)
+})
+
+test('kategori config: alias ter-resolve, nama ngawur null', () => {
+  assert.equal(resolveConfigCategory('jadibot'), 'jadibot')
+  assert.equal(resolveConfigCategory('bots'), 'jadibot')
+  assert.equal(resolveConfigCategory('BOTS'), 'jadibot')
+  assert.equal(resolveConfigCategory('penjaga'), 'bigsend')
+  assert.equal(resolveConfigCategory('kuramanime'), 'anime')
+  assert.equal(resolveConfigCategory('jembatan'), 'ryn')
+  assert.equal(resolveConfigCategory('umum'), 'umum')
+  assert.equal(resolveConfigCategory('ngawur'), null)
+  assert.equal(resolveConfigCategory(''), null)
+})
+
+test('kategori config: listConfig membawa kategori & groupConfigRows mencakup semua baris tepat sekali', async t => {
+  const { db } = await setup(t)
+  applyStoredConfig(db)
+  const rows = listConfig(db)
+  assert.ok(rows.every(r => typeof r.category === 'string' && r.category))
+  const groups = groupConfigRows(rows)
+  assert.deepEqual(groups.map(g => g.id), ['umum', 'jadibot', 'bigsend', 'anime', 'kdrive', 'ryn'])
+  const total = groups.reduce((n, g) => n + g.rows.length, 0)
+  assert.equal(total, rows.length, 'setiap baris muncul tepat di satu kelompok')
+  assert.equal(groups.find(g => g.id === 'jadibot').rows.length, 11)
+})
+
+test('perintah .config list per kategori: filter, tampilan berkelompok, kategori asing ditolak', async t => {
+  const { db } = await setup(t)
+  applyStoredConfig(db)
+  const mFull = fakeM()
+  await configCommand(mFull, ctx('list'))
+  for (const label of ['Umum', 'Jadibot (Sub-Bot)', 'Penjaga Kirim Besar', 'Anime (Kuramanime)', 'kDrive', 'Ryn — Jembatan & Chat']) {
+    assert.match(mFull.replies.at(-1), new RegExp(label.replace(/[()—]/g, '\\$&')), `list penuh memuat kelompok ${label}`)
+  }
+  const mBots = fakeM()
+  await configCommand(mBots, ctx('list bots'))
+  assert.match(mBots.replies.at(-1), /Konfigurasi — Jadibot \(Sub-Bot\)/)
+  assert.match(mBots.replies.at(-1), /bots\.enabled/)
+  assert.ok(!/bigsend\.mode/.test(mBots.replies.at(-1)), 'kategori lain tidak ikut tampil')
+  await assert.rejects(configCommand(fakeM(), ctx('list ngawur')), /Kategori tidak dikenal: ngawur/)
 })
