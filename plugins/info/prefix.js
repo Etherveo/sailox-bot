@@ -11,9 +11,9 @@ let handler = async (m, { conn }) => {
   m.reply(`📍 Prefix aktif saat ini:\n> ${prefixStr}`)
 }
 
-handler.help = ['prefix']
+handler.help = ['cekprefix', 'prefix']
 handler.tags = ['info']
 handler.command = new RegExp()
-handler.prefixless = /^prefix$/i
+handler.prefixless = /^(cek)?prefix$/i
 
 export default handler
