@@ -13,6 +13,7 @@ global.markOnline = false
 global.cooldownMs = 1000
 global.maxMessageAgeSec = 120
 global.hotReloadCore = false
+global.bootAnnounce = true // Kirim "Bot hidup" ke DM founder sekali tiap bot boot. Runtime: .config set bootAnnounce off
 global.logPrivacy = 'masked' // AGENTS: minimalkan isi chat/nomor pada log secara default
 global.kdriveMode = 'direct' // Engine downloader kDrive: 'direct' = request langsung ke kuramadrive (perlu jaringan ter-whitelist); 'stranger' = server asing — bot tidak request ke kuramadrive, .unduh hanya menerima URL endpoint langsung hasil resolusi pihak ter-whitelist. Bisa diganti runtime: .config set kdriveMode stranger
 global.rynScope = 'private' // Jangkauan chat Ryn (.ryn dkk): 'private' = DM founder saja | 'group' = grup saja | 'both'. Bisa diganti runtime: .config set rynScope both
