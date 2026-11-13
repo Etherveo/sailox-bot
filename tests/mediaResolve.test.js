@@ -2,7 +2,9 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { downloadMediaMessage } from '@whiskeysockets/baileys'
 import { smsg, serialize } from '../lib/simple.js'
+import { silentLogger } from '../lib/helpers/silentLogger.js'
 import { raw, fakeConn, PN } from './fixtures.js'
 import { resolveMediaTarget, stickerKindFor, downloadMediaWithFallback, MediaGoneError } from '../lib/media/resolve.js'
 import stickerPlugin from '../plugins/sticker/sticker.js'
@@ -163,5 +165,67 @@ test('plugin .s: dokumen gambar + quote once-view jadi stiker', async t => {
   Object.defineProperty(mVo.quoted, 'download', { value: async () => { throw new Error('No valid media URL or directPath present in message') } })
   await stickerPlugin.call(conn, mVo, ctx)
   assert.ok(conn.calls.filter(c => c.data?.sticker).length >= 2, 'quote once-view terkirim sebagai stiker via fallback store')
+  await conn.store.close()
+})
+
+// ── Format ASLI once-view (hasil eval m.quoted Veo 2026-11-13) ───────────
+// Quote once-view ternyata BUKAN bungkusan viewOnceMessageV2: melainkan
+// media telanjang (imageMessage/videoMessage) dengan flag viewOnce:true,
+// LENGKAP dengan url + mediaKey + directPath. Jadi unduhan langsung dari
+// quote bisa jalan; fallback store hanya jaring pengaman.
+
+const voRealImg = () => ({
+  imageMessage: {
+    mimetype: 'image/jpeg', caption: '.rvo', fileLength: 1234,
+    url: 'https://127.0.0.1:1/foto.jpg', mediaKey: Buffer.alloc(32, 7),
+    directPath: '/o1/v/foto.jpg', viewOnce: true,
+    jpegThumbnail: Buffer.from([1, 2, 3]),
+  },
+})
+const voRealVid = () => ({
+  videoMessage: {
+    mimetype: 'video/mp4', caption: '.s', seconds: 3, fileLength: 123456,
+    url: 'https://127.0.0.1:1/video.mp4', mediaKey: Buffer.alloc(32, 8),
+    directPath: '/v/video.mp4', viewOnce: true,
+    jpegThumbnail: Buffer.from([1, 2, 3]),
+  },
+})
+
+test('format asli: quote once-view telanjang + viewOnce:true, URL ada di quote', () => {
+  const conn = plainConn()
+  const tImg = resolveMediaTarget(smsg(conn, cmdWithQuote(voRealImg())))
+  assert.equal(tImg.via, 'quoted')
+  assert.equal(tImg.mtype, 'imageMessage')
+  assert.equal(tImg.mediaType, 'image')
+  assert.ok(String(tImg.msg.msg.url).startsWith('https://'), 'quote membawa URL media')
+  assert.equal(stickerKindFor(tImg), 'image')
+  const tVid = resolveMediaTarget(smsg(conn, cmdWithQuote(voRealVid())))
+  assert.equal(tVid.mtype, 'videoMessage')
+  assert.equal(tVid.msg.msg.seconds, 3)
+  assert.equal(stickerKindFor(tVid), 'video')
+})
+
+test('format asli: downloadMediaMessage mengekstrak media dari quote (gagal di fetch, bukan di ekstraksi)', async () => {
+  const conn = plainConn()
+  const q = smsg(conn, cmdWithQuote(voRealImg())).quoted
+  await assert.rejects(
+    () => downloadMediaMessage(q, 'stream', { options: { signal: AbortSignal.timeout(5000) } }, { logger: silentLogger, reuploadRequest: async m => m }),
+    /fetch failed/,
+    'ekstraksi berhasil (URL ketemu) — hanya fetch ke URL palsu yang gagal',
+  )
+})
+
+test('plugin .s + .rvo: quote once-view format asli langsung jadi stiker / terkirim ulang', async t => {
+  const conn = fakeConn()
+  const dir = path.dirname(fileURLToPath(import.meta.url))
+  const ctx = { conn, text: '', __dirname: path.join(dir, '..', 'plugins', 'sticker') }
+  const mS = smsg(conn, cmdWithQuote(voRealVid(), 'cmd-vo-s'))
+  Object.defineProperty(mS.quoted, 'download', { value: async () => PNG() })
+  await stickerPlugin.call(conn, mS, ctx)
+  assert.ok(conn.calls.find(c => c.data?.sticker), 'once-view video format asli jadi stiker')
+  const mRvo = smsg(conn, cmdWithQuote(voRealImg(), 'cmd-vo-rvo'))
+  Object.defineProperty(mRvo.quoted, 'download', { value: async () => PNG() })
+  await rvoPlugin.call(conn, mRvo, { conn })
+  assert.ok(conn.calls.find(c => c.data?.image), 'once-view gambar format asli terkirim ulang sebagai pesan biasa')
   await conn.store.close()
 })
