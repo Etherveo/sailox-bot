@@ -416,7 +416,7 @@ test('pin: link Pinterest masuk antrean, non-Pinterest ditolak, query ditolak je
   assert.match(m.replies.at(-1), /Masuk antrean/)
   assert.match(m.replies.at(-1), /Pinterest/)
   await assert.rejects(pinHandler(m, { conn, text: 'https://example.com/x.jpg', usedPrefix: '.', command: 'pin', downloadQueue: queue }), /bukan Pinterest/)
-  await assert.rejects(pinHandler(m, { conn, text: 'wallpaper anime', usedPrefix: '.', command: 'pin', downloadQueue: queue }), /masih disiapkan/)
+  await assert.rejects(pinHandler(m, { conn, text: 'wallpaper anime', usedPrefix: '.', command: 'pin', downloadQueue: queue, pinterestSearch: async () => [] }), /ga ketemu/)
   await assert.rejects(pinHandler(m, { conn, text: '', usedPrefix: '.', command: 'pin', downloadQueue: queue }), /\.pin https:\/\/pin\.it/)
   // Tunggu pump antrean selesai (job noop langsung done) sebelum cleanup,
   // kalau tidak rm balapan dengan tulis file antrean.

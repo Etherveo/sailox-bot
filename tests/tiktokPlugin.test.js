@@ -46,14 +46,16 @@ test('antrean: klaim manual kedaluwarsa dibuang saat antrean berikutnya masuk', 
 
 // ─── Store follow-up ───────────────────────────────────────────────────────
 
-test('followup .tt: simpan, ambil, hapus, dan kedaluwarsa 40 detik', () => {
+test('followup .tt: simpan, ambil, hapus, dan kedaluwarsa 30 detik', () => {
   let now = 1000
   const store = createTiktokFollowupStore({ now: () => now })
   store.put('chat1', 'S', { videoHD: 'https://cdn/hd.mp4', audio: null, title: 'T' })
   assert.equal(store.get('chat1', 'S').videoHD, 'https://cdn/hd.mp4')
   assert.equal(store.get('chat2', 'S'), null, 'chat lain tidak ikut terpicu')
-  now += 40 * 1000
-  assert.equal(store.get('chat1', 'S'), null, 'kedaluwarsa setelah 40 detik')
+  now += 29 * 1000
+  assert.ok(store.get('chat1', 'S'), 'masih hidup sebelum 30 detik')
+  now += 1000
+  assert.equal(store.get('chat1', 'S'), null, 'kedaluwarsa setelah 30 detik')
   store.put('chat1', 'S', { videoHD: null, audio: 'https://cdn/a.mp3', title: 'T' })
   store.delete('chat1', 'S')
   assert.equal(store.get('chat1', 'S'), null)
@@ -183,4 +185,96 @@ test('plugin .tt: follow-up hd > 25 MB terkirim sebagai dokumen, SD kecil tetap 
     assert.equal(sentFiles[1].name, 'tiktok_hd.mp4')
     assert.deepEqual(sentFiles[1].options, { asDocument: true }, 'HD di atas 25 MB jadi dokumen')
   } finally { globalThis.fetch = realFetch }
+})
+
+// ─── Prompt follow-up dihapus setelah sesi berakhir (2026-11-14) ───────────
+// Sesi .tt kini 30 detik dan pesan prompt DIHAPUS — baik setelah dipakai
+// (hd/mp3) maupun saat kedaluwarsa (timer). Timer palsu dipakai supaya
+// tes tidak menunggu 30 detik sungguhan.
+
+function fakeTimers() {
+  const timers = new Map()
+  let nextId = 1
+  return {
+    setTimeoutFn: (fn, ms) => { const id = nextId++; const t = { id, unref() {} }; timers.set(id, { fn, ms }); return t },
+    clearTimeoutFn: t => { timers.delete(t?.id) },
+    fireAll: () => { for (const { fn } of [...timers.values()]) fn(); timers.clear() },
+  }
+}
+
+const SAVETIK_HTML = '<h3>Judul Tes</h3><div class="dl-action">' +
+  '<a href="https://cdn.test/hd.mp4">Download MP4 HD</a>' +
+  '<a href="https://cdn.test/sd1.mp4">Download MP4 [1]</a></div>'
+
+function stubSavetikFetch() {
+  const realFetch = globalThis.fetch
+  globalThis.fetch = async url => {
+    if (String(url).includes('savetik.io/api')) return Response.json({ status: 'ok', data: SAVETIK_HTML })
+    if (String(url).includes('cdn.test/')) {
+      return new Response(new Uint8Array([0, 0, 0, 24, 102, 116, 121, 112]), { headers: { 'content-type': 'video/mp4' } })
+    }
+    throw new Error('URL tak dikenal di stub: ' + url)
+  }
+  return () => { globalThis.fetch = realFetch }
+}
+
+test('plugin .tt: pesan prompt dihapus setelah follow-up hd dipakai', async () => {
+  const restoreFetch = stubSavetikFetch()
+  try {
+    const sentFiles = []
+    const sendCalls = []
+    const replies = []
+    const fakeConn = {
+      sendFile: async (chat, src, name, caption) => { sentFiles.push({ src, name, caption }) },
+      sendMessage: async (chat, data) => { sendCalls.push(data); return { key: { id: 'sent' + sendCalls.length, remoteJid: chat, fromMe: true } } },
+    }
+    const fakeQueue = {
+      enqueue: async () => ({ job: { id: 11 } }),
+      finish: async () => {},
+    }
+    const promptKey = { id: 'prompt1', remoteJid: 'chat-tt3', fromMe: true }
+    const m = {
+      chat: 'chat-tt3', sender: 'S-tt3', pushName: 'V',
+      key: { remoteJid: 'chat-tt3', id: 'msg1' },
+      conn: fakeConn, fromMe: false,
+      reply: async text => { replies.push(text); return { key: promptKey } },
+    }
+    await tiktokHandler(m, { conn: fakeConn, text: 'https://vt.tiktok.com/abc/', downloadQueue: fakeQueue })
+    assert.equal(sentFiles.length, 1)
+    assert.ok(replies.some(r => r.includes('30 detik')), 'prompt menyebut 30 detik')
+    const m2 = { ...m, text: 'hd', key: { remoteJid: 'chat-tt3', id: 'msg2' } }
+    assert.equal(await tiktokHandler.before(m2, { conn: fakeConn }), true)
+    assert.equal(sentFiles.length, 2)
+    assert.ok(sendCalls.some(d => d?.delete?.id === 'prompt1'), 'pesan prompt dihapus setelah hd dipakai')
+  } finally { restoreFetch() }
+})
+
+test('plugin .tt: pesan prompt dihapus saat sesi 30 detik kedaluwarsa', async () => {
+  const restoreFetch = stubSavetikFetch()
+  try {
+    const sendCalls = []
+    const fakeConn = {
+      sendFile: async () => {},
+      sendMessage: async (chat, data) => { sendCalls.push(data); return { key: { id: 'sent' + sendCalls.length, remoteJid: chat, fromMe: true } } },
+    }
+    const fakeQueue = {
+      enqueue: async () => ({ job: { id: 12 } }),
+      finish: async () => {},
+    }
+    const timers = fakeTimers()
+    const followup = createTiktokFollowupStore({ ttlMs: 30_000, setTimeoutFn: timers.setTimeoutFn, clearTimeoutFn: timers.clearTimeoutFn })
+    const promptKey = { id: 'prompt2', remoteJid: 'chat-tt4', fromMe: true }
+    const m = {
+      chat: 'chat-tt4', sender: 'S-tt4', pushName: 'V',
+      key: { remoteJid: 'chat-tt4', id: 'msg1' },
+      conn: fakeConn, fromMe: false,
+      reply: async () => ({ key: promptKey }),
+    }
+    await tiktokHandler(m, { conn: fakeConn, text: 'https://vt.tiktok.com/abc/', downloadQueue: fakeQueue, tiktokFollowup: followup })
+    assert.equal(followup.size, 1)
+    timers.fireAll()
+    await new Promise(r => setTimeout(r, 50))
+    assert.equal(followup.size, 0)
+    assert.ok(sendCalls.some(d => d?.delete?.id === 'prompt2'), 'pesan prompt dihapus saat timeout')
+  } finally { restoreFetch() }
 })

@@ -16,7 +16,7 @@ let handler = async (m, ctx) => {
   const url = String(text || '').trim().split(/\s+/)[0]
   if (!url) {
     throw (
-      `🎬 *Contoh penggunaan:*\n${usedPrefix + command} https://v9.kuramanime.blog/anime/5139/li-xiongmao/episode/15\n\n` +
+      `🎬 *Contoh penggunaan:*\n${usedPrefix + command} https://v20.kuramanime.ing/anime/5139/li-xiongmao/episode/15\n\n` +
       'Tempel link EPISODE untuk langsung memilih provider unduhan, atau link DETAIL anime untuk melihat daftar episodenya.\n' +
       'Atau mulai dari *.ongoing* / *.carianime <judul>*.'
     )

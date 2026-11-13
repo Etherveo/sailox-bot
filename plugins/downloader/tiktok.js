@@ -35,32 +35,22 @@ import { getDownloadQueue } from '#lib/downloader/queue.js'
 import { attachEngineNotifierWithConn, reportEngineError } from '#lib/downloader/index.js'
 import { ensureDir, ensureProviderDir } from '#lib/helpers/ensureDir.js'
 import { reactTo, REACT } from '#lib/helpers/react.js'
+import { createSessionStore } from '#lib/helpers/sessionStore.js'
 
 // Penanda follow-up interaktif .tt (balas hd/mp3) — padanan conn.tiktokopt
 // legacy. Kunci = chat:sender (legacy hanya sender; chat ditambahkan supaya
-// balasan 'hd' di grup lain tidak ikut terpicu). Kedaluwarsa MALAS (lazy):
-// entri kedaluwarsa dianggap tidak ada saat dibaca — tanpa timer, tanpa
-// timer bocor saat proses berjalan lama.
+// balasan 'hd' di grup lain tidak ikut terpicu).
 //
-// Store tinggal di sini sejak refactor aturan arsitektur 2026-10-28
-// (sebelumnya lib/helpers/tiktokFollowup.js — hanya dipakai plugin ini).
-export const TIKTOK_FOLLOWUP_TTL_MS = 40 * 1000
+// Store kini di atas store sesi generik (lib/helpers/sessionStore.js —
+// dipakai bersama sesi resolusi .dl, jadi mekaniknya memang bersama):
+// sama-sama kunci chat:sender + TTL, ditambah TIMER kedaluwarsa yang
+// menjalankan callback saat sesi berakhir — dipakai untuk menghapus
+// pesan prompt .tt setelah 30 detik (dulu prompt menggantung selamanya).
+// Timer di-unref dan dibersihkan saat entri dipakai/dihapus, tanpa bocor.
+export const TIKTOK_FOLLOWUP_TTL_MS = 30 * 1000
 
-export function createTiktokFollowupStore({ ttlMs = TIKTOK_FOLLOWUP_TTL_MS, now = () => Date.now() } = {}) {
-  const map = new Map()
-  const key = (chat, sender) => `${chat}:${sender}`
-  return {
-    put(chat, sender, value) { map.set(key(chat, sender), { ...value, expiresAt: now() + ttlMs }) },
-    get(chat, sender) {
-      const k = key(chat, sender)
-      const e = map.get(k)
-      if (!e) return null
-      if (e.expiresAt <= now()) { map.delete(k); return null }
-      return e
-    },
-    delete(chat, sender) { map.delete(key(chat, sender)) },
-    get size() { return map.size },
-  }
+export function createTiktokFollowupStore(opts = {}) {
+  return createSessionStore({ ttlMs: TIKTOK_FOLLOWUP_TTL_MS, ...opts })
 }
 
 /** Singleton dipakai plugin .tt. */
@@ -87,6 +77,13 @@ export async function ttSendOptions(downloaded, waFileName) {
   if (!isVideo) return {}
   const size = Number.isFinite(downloaded?.size) ? downloaded.size : (await fs.stat(downloaded.filePath)).size
   return size > TT_VIDEO_INLINE_MAX_BYTES ? { asDocument: true } : {}
+}
+
+// Hapus pesan prompt follow-up .tt (dipakai saat sesi dipakai maupun
+// saat kedaluwarsa — prompt tidak boleh menggantung setelah 30 detik).
+async function deleteFollowupPrompt(conn, entry) {
+  if (!entry?.promptKey) return
+  try { await conn.sendMessage(entry.chat, { delete: entry.promptKey }) } catch { /* pesan sudah hilang */ }
 }
 
 function projectRoot() {
@@ -139,7 +136,7 @@ let handler = async (m, ctx) => {
   const queue = ctx.downloadQueue ?? getDownloadQueue(projectRoot())
   const url = (text ?? '').trim().split(/\s+/)[0] ?? ''
   if (!url || !match(url)) {
-    throw '📹 *TikTok interaktif*\n\nKirim link-nya:\n.tt <link tiktok>\n\nVideo SD dikirim, lalu kirim *hd* untuk versi HD atau *mp3* untuk audionya (teks biasa, tanpa reply, berlaku 40 detik).'
+    throw '📹 *TikTok interaktif*\n\nKirim link-nya:\n.tt <link tiktok>\n\nVideo SD dikirim, lalu kirim *hd* untuk versi HD atau *mp3* untuk audionya (teks biasa, tanpa reply, berlaku 30 detik).'
   }
   // Klaim manual: dedupe + batas per pengguna antrean .dl berlaku penuh.
   const { job } = await queue.enqueue({
@@ -170,8 +167,14 @@ let handler = async (m, ctx) => {
     const video = res.videoSD || res.videoHD
     if (!video) throw new Error('Resolver TikTok tidak mengembalikan media.')
     await sendMediaFromUrl(conn, m.chat, video, 'tiktok.mp4', `📹 *${res.title}*`, m, root)
-    tiktokFollowup.put(m.chat, m.sender, { videoHD: res.videoHD, audio: res.audio, title: res.title })
-    await m.reply("Kirim *hd* untuk versi HD atau *mp3* untuk audionya (teks biasa saja, tanpa reply, berlaku 40 detik).")
+    const promptMsg = await m.reply("Kirim *hd* untuk versi HD atau *mp3* untuk audionya (teks biasa saja, tanpa reply, berlaku 30 detik).")
+    // Sesi 30 detik: kedaluwarsa (timer) menghapus pesan prompt; kunci
+    // pesan disimpan di entri supaya bisa dihapus juga saat dipakai.
+    const followup = ctx.tiktokFollowup ?? tiktokFollowup
+    followup.put(m.chat, m.sender, {
+      chat: m.chat, videoHD: res.videoHD, audio: res.audio, title: res.title,
+      promptKey: promptMsg?.key ?? null,
+    }, entry => deleteFollowupPrompt(conn, entry))
     await reactTo(m, REACT.done).catch(() => {})
   } catch (e) {
     status = 'failed'
@@ -191,14 +194,15 @@ let handler = async (m, ctx) => {
 
 // Follow-up: pesan teks 'hd' / 'mp3' / 'audio' persis (bukan perintah,
 // teks biasa — sengaja BUKAN reply, supaya tidak bentrok dengan trigger
-// reply Ryn) dalam 40 detik setelah .tt, dari pengirim yang sama di chat
+// reply Ryn) dalam 30 detik setelah .tt, dari pengirim yang sama di chat
 // yang sama. Reply 'hd' ke pesan bot tetap diterima (teksnya sama), tapi
 // prompt tidak lagi menyuruh reply.
 handler.before = async (m, ctx) => {
   if (m.fromMe) return false
   const teks = (m.text ?? '').trim().toLowerCase()
   if (teks !== 'hd' && teks !== 'mp3' && teks !== 'audio') return false
-  const entry = tiktokFollowup.get(m.chat, m.sender)
+  const followup = ctx.tiktokFollowup ?? tiktokFollowup
+  const entry = followup.get(m.chat, m.sender)
   if (!entry) return false
   const conn = ctx.conn ?? m.conn
   const root = projectRoot()
@@ -206,14 +210,16 @@ handler.before = async (m, ctx) => {
     if (!entry.videoHD) { await m.reply('HD tidak tersedia'); return true }
     await reactTo(m, REACT.processing).catch(() => {})
     await sendMediaFromUrl(conn, m.chat, entry.videoHD, 'tiktok_hd.mp4', `🎥 ${entry.title}`, m, root)
-    tiktokFollowup.delete(m.chat, m.sender)
+    await deleteFollowupPrompt(conn, entry)
+    followup.delete(m.chat, m.sender)
     await reactTo(m, REACT.done).catch(() => {})
     return true
   }
   if (!entry.audio) { await m.reply('Audio tidak tersedia'); return true }
   await reactTo(m, REACT.processing).catch(() => {})
   await sendMediaFromUrl(conn, m.chat, entry.audio, `${entry.title.slice(0, 100)}.mp3`, '', m, root)
-  tiktokFollowup.delete(m.chat, m.sender)
+  await deleteFollowupPrompt(conn, entry)
+  followup.delete(m.chat, m.sender)
   await reactTo(m, REACT.done).catch(() => {})
   return true
 }

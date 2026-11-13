@@ -23,8 +23,8 @@ test('catalog ongoing: parse JSON + buildLatestUrl episode & batch', () => {
   const r = parseOngoingJson(JSON.stringify(ongoingFixture))
   assert.equal(r.items.length, 2)
   assert.equal(r.pagination.totalPages, 9)
-  assert.equal(buildLatestUrl(r.items[0]), 'https://v9.kuramanime.blog/anime/5139/li-xiongmao/episode/15')
-  assert.equal(buildLatestUrl(r.items[1]), 'https://v9.kuramanime.blog/anime/200/batch-anime/batch/1-12')
+  assert.equal(buildLatestUrl(r.items[0]), 'https://v20.kuramanime.ing/anime/5139/li-xiongmao/episode/15')
+  assert.equal(buildLatestUrl(r.items[1]), 'https://v20.kuramanime.ing/anime/200/batch-anime/batch/1-12')
   assert.match(formatOngoingLabel(r.items[0]), /Li Xiongmao \(HD\) — Ep 15 \[BARU\]/)
 })
 
@@ -33,7 +33,7 @@ test('catalog ongoing: parse JSON + buildLatestUrl episode & batch', () => {
 test('catalog search: parse JSON animes.data', () => {
   const raw = JSON.stringify({ animes: { current_page: 1, last_page: 1, total: 1, next_page_url: null, prev_page_url: null, data: [{ id: 5139, slug: 'li-xiongmao', title: 'Li Xiongmao', score: 8.1, quality: 'HD' }] } })
   const r = parseSearchPage(raw)
-  assert.equal(r.items[0].url, 'https://v9.kuramanime.blog/anime/5139/li-xiongmao')
+  assert.equal(r.items[0].url, 'https://v20.kuramanime.ing/anime/5139/li-xiongmao')
   assert.equal(r.items[0].score, 8.1)
 })
 
