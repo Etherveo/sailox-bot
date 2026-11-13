@@ -23,3 +23,12 @@ test('group object participants welcome/detect and self/throttle guards', async 
 test('error report to contacted founder does not crash intake (inbound.has regression)', async t => { global.founder = [['6281234567890', 'Founder']]; t.after(() => { delete global.founder }); const failing = plugin(async () => { throw new Error('boom internal') }, { command: /^boom$/ }); const { run, conn, errors } = await setup(t, [['boom.js', failing]], { founder: [['6281234567890', 'Founder']] }); await run([raw('halo', { id: 'opener' })]); await run([raw('.boom', { id: 'boom1' })]); assert.ok(!errors.some(e => e instanceof TypeError && /has is not a function/.test(e.message)), 'tidak boleh ada TypeError inbound.has di jalur laporan error'); const report = conn.calls.find(c => c.jid === PN && /boom\.js/.test(c.data?.text || '')); assert.ok(report, 'laporan error plugin harus terkirim ke founder yang sudah pernah menghubungi bot') })
 
 test('gerbang registrasi bawaan: user belum daftar ditolak dengan pesan unreg; plugin register=false tetap jalan', async t => { let runs = 0, open = 0; const { run, db, conn } = await setup(t, [['ping.js', plugin(async () => { runs++ })], ['open.js', plugin(async () => { open++ }, { command: /^open$/, register: false })]]); db.ensure('users', LID).registered = false; db.ensure('users', PN).registered = false; await run([raw('.ping', { id: 'u1' })]); assert.equal(runs, 0); assert.match(conn.calls.find(c => c.data).data.text, /Daftar dulu/); await run([raw('.open', { id: 'u2' })]); assert.equal(open, 1) })
+
+test('pesan once-view masuk pipeline seperti pesan biasa (diproses + tersimpan)', async t => {
+  let runs = 0
+  const { run, conn } = await setup(t, [['ping.js', plugin(async () => { runs++ })]])
+  const vo = raw('', { id: 'vo1', message: { viewOnceMessageV2: { message: { imageMessage: { caption: '.ping', mimetype: 'image/jpeg' } } } } })
+  await run([vo])
+  assert.equal(runs, 1, 'once-view dengan caption command tetap diproses (dan masuk log di finally)')
+  assert.ok(conn.store.loadMessage('vo1'), 'pesan once-view asli tersimpan di store (untuk fallback .s/.rvo)')
+})
