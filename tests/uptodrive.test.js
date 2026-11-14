@@ -139,3 +139,33 @@ test('plugin uptodrive: listing, pilih nama, pilih nomor, folderId khusus', asyn
   assert.equal(uptodrive.owner, true)
   assert.match(formatListing('.', [{ name: 'f', type: 'dir', size: 0 }]), /📁 f/)
 })
+
+// ─── Regresi 2026-11-15: rootDir klien Drive ───────────────────────────────
+// .uptodrive sempat memanggil getDriveClient({ rootDir: pluginLoader.root })
+// — padahal itu folder plugins, sehingga kredensial dicari di
+// plugins/src/integrations/gdrive-auth (tidak ada) dan perintah gagal,
+// sementara .adl (lewat driveSync, rootDir = root proyek) jalan normal.
+// Tanpa klien injeksi, handler harus mencari kredensial di root proyek
+// (satu tingkat di atas plugins), bukan di dalam plugins.
+test('plugin uptodrive: kredensial dicari di root proyek, bukan di plugins', async t => {
+  const root = await tmpDir(t, 'sailox-gd-root-')
+  await fs.mkdir(path.join(root, 'plugins'), { recursive: true })
+  await fs.writeFile(path.join(root, 'video.mp4'), Buffer.alloc(5))
+
+  global.fileOps = createFileOps({ root })
+  global.pluginLoader = { root: path.join(root, 'plugins') }
+  t.after(() => { delete global.fileOps; delete global.pluginLoader })
+
+  const m = { chat: 'c', sender: '6282348181097@s.whatsapp.net', replies: [], reply(x) { this.replies.push(String(x)); return Promise.resolve() } }
+
+  await assert.rejects(
+    () => uptodrive(m, { text: 'video.mp4' }),
+    err => {
+      const msg = String(err?.message || err)
+      assert.match(msg, /credentials\.json Drive tidak ditemukan di /)
+      assert.ok(msg.includes(path.join(root, 'src', 'integrations', 'gdrive-auth')), `authDir harus di root proyek: ${msg}`)
+      assert.ok(!msg.includes(path.join('plugins', 'src', 'integrations')), `authDir tidak boleh di dalam plugins: ${msg}`)
+      return true
+    }
+  )
+})

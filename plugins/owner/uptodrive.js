@@ -16,6 +16,15 @@ import { formatSize } from '../../lib/downloader/runJob.js'
 // (pemisah ":" atau "|"). Bawaan: global.gdriveFolderId atau folder
 // bawaan legacy. File bernama sama di tujuan dilewati, folder rekursif.
 
+// Root proyek = satu tingkat di atas folder plugins (pola yang sama
+// seperti plugins/anime/pilih.js). JANGAN pakai pluginLoader.root
+// mentah-mentah: itu folder plugins, dan getDriveClient akan mencari
+// kredensial di plugins/src/integrations/gdrive-auth (tidak ada).
+function projectRoot() {
+  const pluginsRoot = global.pluginLoader?.root
+  return pluginsRoot ? path.resolve(pluginsRoot, '..') : process.cwd()
+}
+
 function parseArgs(text = '') {
   const raw = String(text || '').trim()
   const m = raw.match(/^(.*?)\s*(?:\||:)\s*([A-Za-z0-9_-]{10,})\s*$/)
@@ -59,7 +68,7 @@ let handler = async (m, { conn, text }) => {
   if (st.type === 'file' && st.size > MAX_UPLOAD_BYTES) throw new Error('❌ File melebihi batas maksimum 10 GiB.')
 
   const dest = defaultTargetFolderId(destArg)
-  const client = global.uptodriveClient ?? getDriveClient({ rootDir: global.pluginLoader?.root })
+  const client = global.uptodriveClient ?? getDriveClient({ rootDir: projectRoot() })
   const name = path.basename(abs)
 
   await m.reply(`☁️ Mengunggah ke Google Drive...\n${st.type === 'dir' ? '📁' : '📄'} ${name}${st.type === 'file' ? ` — ${formatSize(st.size)}` : ''}`)
