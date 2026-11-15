@@ -7,7 +7,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { proto, unpadRandomMax16 } from '@whiskeysockets/baileys'
-import swgcHandler, { buildSwgcInner, reuseMediaContent, sendGroupStatus, relayGroupStatusMedia, forkMediaType, forkStanzaType, swgcMode, assertSwgcAllowed, swgcAuthorJid, SWGC_MAX_TEXT } from '../plugins/group/swgc.js'
+import swgcHandler, { buildSwgcInner, reuseMediaContent, sendGroupStatus, relayGroupStatusMedia, forkMediaType, forkStanzaType, swgcMode, assertSwgcAllowed, swgcAuthorJid, parseSwgcCaption, defaultSwgcCaption, SWGC_MAX_TEXT } from '../plugins/group/swgc.js'
 import groupHandler, { parseGroupSet } from '../plugins/group/group.js'
 
 const GROUP = '120363999888777@g.us'
@@ -115,12 +115,50 @@ test('swgc: reply gambar tanpa teks mempertahankan caption lama; dengan teks men
 })
 
 test('swgc: media pada pesan perintah sendiri didahulukan, caption dipaksa dari teks sesudah perintah', async () => {
-  const m = baseM(fakeConn(), { mtype: 'videoMessage', msg: { caption: '.swgc', seconds: 4, jpegThumbnail: Buffer.alloc(10, 3) } })
+  const m = baseM(fakeConn(), { mtype: 'videoMessage', msg: { caption: '.swgc', seconds: 4, jpegThumbnail: Buffer.alloc(10, 3) }, name: 'Imayuno Sailox' })
   const inner = await buildSwgcInner(m, 'teks baru')
   assert.equal(inner.videoMessage.caption, 'teks baru')
   assert.equal(Number(inner.videoMessage.seconds), 4)
   const kosong = await buildSwgcInner(m, '')
-  assert.equal(kosong.videoMessage.caption, '')
+  assert.equal(kosong.videoMessage.caption, 'Posted by @Imayuno Sailox', 'tanpa teks: caption default nama pengirim')
+})
+
+test('swgc: parseSwgcCaption — token --nowm dibuang di mana saja, sisa teks utuh', () => {
+  assert.deepEqual(parseSwgcCaption('--nowm'), { nowm: true, caption: '' })
+  assert.deepEqual(parseSwgcCaption('  halo   --NoWm  dunia  '), { nowm: true, caption: 'halo dunia' })
+  assert.deepEqual(parseSwgcCaption('caption biasa'), { nowm: false, caption: 'caption biasa' })
+  assert.deepEqual(parseSwgcCaption('foo--nowm'), { nowm: false, caption: 'foo--nowm' }, 'bukan token utuh: tidak dibuang')
+  assert.deepEqual(parseSwgcCaption(''), { nowm: false, caption: '' })
+})
+
+test('swgc: defaultSwgcCaption — "Posted by @nama", jatuh ke Pengguna bila nama kosong', () => {
+  assert.equal(defaultSwgcCaption({ name: 'Imayuno Sailox' }), 'Posted by @Imayuno Sailox')
+  assert.equal(defaultSwgcCaption({}), 'Posted by @Pengguna')
+  assert.equal(defaultSwgcCaption({ name: '   ' }), 'Posted by @Pengguna')
+})
+
+test('swgc: --nowm pada media sendiri memaksa caption kosong; teks eksplisit tetap menang', async () => {
+  const m = baseM(fakeConn(), { mtype: 'videoMessage', msg: { caption: '.swgc', seconds: 4, jpegThumbnail: Buffer.alloc(10, 3) }, name: 'Imayuno Sailox' })
+  const bersih = await buildSwgcInner(m, '--nowm')
+  assert.equal(bersih.videoMessage.caption, '')
+  const berteks = await buildSwgcInner(m, '--nowm captionku')
+  assert.equal(berteks.videoMessage.caption, 'captionku', 'teks eksplisit menang atas --nowm')
+})
+
+test('swgc: reply gambar tanpa caption sumber + tanpa teks → caption default; --nowm → kosong', async () => {
+  const noCaption = { mtype: 'imageMessage', msg: { ...SRC_IMG_MSG, caption: '' } }
+  const dflt = await buildSwgcInner(baseM(fakeConn(), { quoted: noCaption, name: 'Imayuno Sailox' }), '')
+  assert.equal(dflt.imageMessage.caption, 'Posted by @Imayuno Sailox')
+  const bersih = await buildSwgcInner(baseM(fakeConn(), { quoted: { mtype: 'imageMessage', msg: SRC_IMG_MSG }, name: 'Imayuno Sailox' }), '--nowm')
+  assert.equal(bersih.imageMessage.caption, '', '--nowm membersihkan caption sumber')
+})
+
+test('swgc: teks saja — --nowm dibuang dari isi, tanpa teks lain tetap usage', async () => {
+  let seen = null
+  const inner = await buildSwgcInner(baseM(fakeConn()), '--nowm Halo semua!', async content => { seen = content; return { extendedTextMessage: { text: content.text } } })
+  assert.equal(seen.text, 'Halo semua!')
+  assert.equal(inner.extendedTextMessage.text, 'Halo semua!')
+  await assert.rejects(buildSwgcInner(baseM(fakeConn()), '--nowm'), /Kirim\/reply gambar/)
 })
 
 test('swgc: reply audio dipakai ulang apa adanya, teks tidak jadi caption, sourceType AUDIO', async () => {

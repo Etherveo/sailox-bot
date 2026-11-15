@@ -92,7 +92,26 @@ export function assertSwgcAllowed(mode, { isAdmin } = {}) {
   if (mode === 'admin' && !isAdmin) throw 'Di grup ini .swgc cuma buat admin grup. Admin bisa melonggarkannya buat semua anggota: .group set swgc all'
 }
 const MEDIA_TYPES = ['imageMessage', 'videoMessage', 'audioMessage']
-const USAGE = 'Kirim/reply gambar, video, atau audio dengan perintah ini, atau kasih teksnya sekalian.\nContoh: .swgc Halo semua! / reply foto dengan .swgc caption baru'
+const USAGE = 'Kirim/reply gambar, video, atau audio dengan perintah ini, atau kasih teksnya sekalian.\nContoh: .swgc Halo semua! / reply foto dengan .swgc caption baru\nTanpa caption, status media memakai "Posted by @nama pengirim" — tambah --nowm untuk post bersih tanpa caption sama sekali.'
+
+// Opsi --nowm (permintaan Veo 2026-11-16): post bersih tanpa caption
+// sama sekali. Token boleh di mana saja dalam teks; tokennya dibuang,
+// sisa teks tetap dipakai sebagai caption bila ada.
+export function parseSwgcCaption(rawText) {
+  const tokens = String(rawText ?? '').split(/\s+/).filter(Boolean)
+  const nowm = tokens.some(t => t.toLowerCase() === '--nowm')
+  const caption = tokens.filter(t => t.toLowerCase() !== '--nowm').join(' ')
+  return { nowm, caption }
+}
+
+// Caption default bila status media akhirnya tanpa caption (permintaan
+// Veo 2026-11-16): "Posted by @nama pengirim" — @ di sini teks biasa,
+// bukan mention sungguhan (status grup tidak bisa men-tag). Nama dari
+// m.name (nama tersimpan / push name pengirim).
+export function defaultSwgcCaption(m) {
+  const name = String(m?.name ?? '').trim() || 'Pengguna'
+  return `Posted by @${name}`
+}
 
 // Blok contextInfo penanda status grup, meniru persis struktur status
 // asli dari fitur resmi WhatsApp (dump Veo 2026-10-31). Enum sebagai
@@ -136,9 +155,13 @@ export function reuseMediaContent(src, caption, authorJid) {
 //   pesan yang di-reply → proto media sumber dipakai ulang, dengan
 //   authorJid = identitas pengirim (bot) untuk atribusi status.
 // - tanpa media → teks perintah, dirakit generator resmi.
+// Caption media: teks eksplisit menang; tanpa teks, --nowm memaksa
+// caption kosong (post bersih — caption sumber ikut dibersihkan);
+// kalau tidak, caption sumber dipertahankan, dan bila sumber pun tanpa
+// caption, caption default "Posted by @nama pengirim" dipakai.
 // `generate` bisa diinjeksi untuk tes.
 export async function buildSwgcInner(m, rawText, generate = generateWAMessageContent, authorJid = '') {
-  const caption = String(rawText ?? '').trim()
+  const { nowm, caption } = parseSwgcCaption(rawText)
   if (caption.length > SWGC_MAX_TEXT) throw `Teks/caption-nya kepanjangan (maks ${SWGC_MAX_TEXT} karakter).`
   const own = MEDIA_TYPES.includes(m?.mtype) ? m : null
   const quoted = !own && m?.quoted && MEDIA_TYPES.includes(m.quoted.mtype) ? m.quoted : null
@@ -149,11 +172,9 @@ export async function buildSwgcInner(m, rawText, generate = generateWAMessageCon
     // generateWAMessageContent jadi tidak memanggil getUrlInfo sama sekali.
     return generate({ text: caption, linkPreview: null }, { logger: silentLogger })
   }
-  // Media dari pesan perintah sendiri: caption aslinya adalah perintah
-  // itu sendiri, jadi caption dipaksa dari teks sesudah perintah (boleh
-  // kosong). Media reply: teks baru menimpa; tanpa teks, caption sumber
-  // dipertahankan (undefined).
-  return reuseMediaContent(src, own ? caption : (caption || undefined), authorJid)
+  const srcCaption = (src.mtype === 'imageMessage' || src.mtype === 'videoMessage') && src.msg?.caption ? String(src.msg.caption) : ''
+  const finalCaption = caption || (nowm ? '' : (own ? defaultSwgcCaption(m) : (srcCaption || defaultSwgcCaption(m))))
+  return reuseMediaContent(src, finalCaption, authorJid)
 }
 
 // --- Relay grup ala fork (temuan 2026-10-31 malam, dari bedah
@@ -302,6 +323,6 @@ let handler = async (m, { conn, text, chat, isAdmin, groupMetadata }) => {
   await reactTo(m, REACT.done).catch(() => {})
   await m.reply('✅ Status grup terkirim — bisa dilihat anggota grup di tab Status.')
 }
-handler.help = ['swgc <teks>', 'swgc (kirim/reply gambar/video/audio)']; handler.tags = ['group']; handler.command = ['swgc', 'upswgc', 'swgroup']
+handler.help = ['swgc <teks>', 'swgc (kirim/reply gambar/video/audio)', 'swgc --nowm (media tanpa caption)']; handler.tags = ['group']; handler.command = ['swgc', 'upswgc', 'swgroup']
 handler.group = true
 export default handler
