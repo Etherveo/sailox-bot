@@ -17,10 +17,10 @@ const toNum = v => {
   return Number.isFinite(n) ? n : 0
 }
 let handler = async (m, { conn, text, __dirname }) => {
-  const wm = parseStickerArgs(text, { packname: global.namebot || 'Sailox', author: global.namebot || 'Sailox' })
+  const wm = parseStickerArgs(text, { packname: global.namebot || 'Sailox', author: "Velaryna" || global.namebot })
   const target = resolveMediaTarget(m)
   const kind = stickerKindFor(target)
-  if (!target || !kind) throw 'Kirim/reply gambar, video, GIF, atau dokumen gambar/video (di bawah 10 detik, maks 5 MB) dengan perintah .s — pesan once-view juga bisa. Watermark sekalian juga bisa: .s Nama Pack | Author'
+  if (!target || !kind) throw 'Kirim/reply gambar, video, GIF, atau dokumen gambar/video'
   const seconds = toNum(target.msg?.msg?.seconds)
   if (kind === 'video') assertVideoLimits({ seconds, bytes: toNum(target.msg?.msg?.fileLength) })
   await reactTo(m, REACT.processing).catch(() => {})
@@ -37,5 +37,5 @@ let handler = async (m, { conn, text, __dirname }) => {
   await conn.sendMessage(m.chat, { sticker }, { quoted: m })
   await reactTo(m, REACT.done).catch(() => {})
 }
-handler.help = ['s (gambar/video/GIF/dokumen/once-view)', 's <pack> | <author>']; handler.tags = ['sticker']; handler.command = ['s', 'sticker', 'stiker']
+handler.help = ['s (gambar/video/GIF/dokumen/once-view)', 's <pack> | <author>']; handler.tags = ['sticker']; handler.command = /^s(?:ti(?:c)?ker)?$/i
 export default handler
