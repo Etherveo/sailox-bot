@@ -1,14 +1,33 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import path from 'node:path'
+import fs from 'node:fs/promises'
+import os from 'node:os'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import { downloadMediaMessage } from '@whiskeysockets/baileys'
 import { smsg, serialize } from '../lib/simple.js'
 import { silentLogger } from '../lib/helpers/silentLogger.js'
 import { raw, fakeConn, PN } from './fixtures.js'
 import { resolveMediaTarget, stickerKindFor, downloadMediaWithFallback, MediaGoneError } from '../lib/media/resolve.js'
+import { ffmpegAvailable, pillowAvailable } from '../lib/media/sticker.js'
 import stickerPlugin from '../plugins/sticker/sticker.js'
+import toimgPlugin from '../plugins/sticker/toimg.js'
 import rvoPlugin from '../plugins/tools/rvo.js'
+
+const execFileP = promisify(execFile)
+
+// Fixture WebP (butuh ffmpeg): animasi = lavfi multi-frame, statis = 1 frame.
+async function makeWebp(t, root, { animated, seconds = 2 }) {
+  if (!await ffmpegAvailable()) return t.skip('ffmpeg tidak tersedia')
+  const file = path.join(root, animated ? 'anim.webp' : 'stat.webp')
+  const args = ['-y', '-v', 'error', '-f', 'lavfi', '-i', `color=c=red:s=64x64:d=${seconds}:r=5`, '-c:v', 'libwebp', '-pix_fmt', 'yuva420p', '-loop', '0']
+  if (!animated) args.push('-frames:v', '1')
+  args.push(file)
+  await execFileP('ffmpeg', args)
+  return fs.readFile(file)
+}
 
 serialize()
 global.namebot = 'Sailox'
@@ -145,6 +164,63 @@ test('plugin .rvo: tanpa media -> pesan pemakaian (bukan crash)', async t => {
   const conn = fakeConn()
   const m = smsg(conn, raw('.rvo'))
   await assert.rejects(() => rvoPlugin.call(conn, m, { conn }), /Reply media once-view/)
+  await conn.store.close()
+})
+
+test('plugin .s: dokumen .webp animasi jadi stiker animasi (butuh ffmpeg + Pillow)', async t => {
+  if (!await pillowAvailable()) return t.skip('Pillow tidak tersedia')
+  const conn = fakeConn()
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'media-tes-'))
+  try {
+    const anim = await makeWebp(t, root, { animated: true })
+    const dir = path.dirname(fileURLToPath(import.meta.url))
+    const ctx = { conn, text: '', __dirname: path.join(dir, '..', 'plugins', 'sticker') }
+    const m = smsg(conn, cmdWithQuote(docInner('image/webp', 'stiker.webp')))
+    Object.defineProperty(m.quoted, 'download', { value: async () => anim })
+    await stickerPlugin.call(conn, m, ctx)
+    const sent = conn.calls.find(c => c.data?.sticker)
+    assert.ok(sent, 'dokumen .webp animasi terkirim sebagai stiker')
+    assert.equal(sent.data.sticker.subarray(0, 4).toString('ascii'), 'RIFF')
+  } finally { await fs.rm(root, { recursive: true, force: true }); await conn.store.close() }
+})
+
+const stickerInner = () => ({
+  stickerMessage: {
+    mimetype: 'image/webp', fileLength: 4321,
+    url: 'https://127.0.0.1:1/stiker.webp', mediaKey: Buffer.alloc(32, 9),
+  },
+})
+
+test('plugin .toimg: stiker animasi -> GIF, stiker statis -> PNG (butuh ffmpeg + Pillow)', async t => {
+  if (!await pillowAvailable()) return t.skip('Pillow tidak tersedia')
+  const conn = fakeConn()
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'media-tes-'))
+  try {
+    const dir = path.dirname(fileURLToPath(import.meta.url))
+    const ctx = { conn, __dirname: path.join(dir, '..', 'plugins', 'sticker') }
+    const anim = await makeWebp(t, root, { animated: true })
+    const mAnim = smsg(conn, cmdWithQuote(stickerInner(), 'cmd-toimg-anim'))
+    Object.defineProperty(mAnim.quoted, 'download', { value: async () => anim })
+    await toimgPlugin.call(conn, mAnim, ctx)
+    const gifSent = conn.calls.find(c => c.data?.video && c.data?.gifPlayback)
+    assert.ok(gifSent, 'stiker animasi terkirim sebagai GIF')
+    assert.equal(gifSent.data.video.subarray(0, 6).toString('ascii'), 'GIF89a')
+    const stat = await makeWebp(t, root, { animated: false })
+    const mStat = smsg(conn, cmdWithQuote(stickerInner(), 'cmd-toimg-stat'))
+    Object.defineProperty(mStat.quoted, 'download', { value: async () => stat })
+    await toimgPlugin.call(conn, mStat, ctx)
+    const pngSent = conn.calls.find(c => c.data?.image)
+    assert.ok(pngSent, 'stiker statis terkirim sebagai gambar')
+    assert.deepEqual([...pngSent.data.image.subarray(0, 4)], [0x89, 0x50, 0x4e, 0x47], 'gambarnya PNG')
+  } finally { await fs.rm(root, { recursive: true, force: true }); await conn.store.close() }
+})
+
+test('plugin .toimg: tanpa stiker -> pesan pemakaian (bukan crash)', async t => {
+  const conn = fakeConn()
+  const dir = path.dirname(fileURLToPath(import.meta.url))
+  const ctx = { conn, __dirname: path.join(dir, '..', 'plugins', 'sticker') }
+  const m = smsg(conn, raw('.toimg'))
+  await assert.rejects(() => toimgPlugin.call(conn, m, ctx), /Reply stiker/)
   await conn.store.close()
 })
 
