@@ -13,4 +13,5 @@ let handler = async (m, { conn, text, usedPrefix, command }) => {
 handler.help = ['qr <teks>', 'qrcode <teks>']; handler.tags = ['tools']; handler.command = /^qr(code)?$/i
 handler.sharing = true;
 
+handler.limit = true
 export default handler

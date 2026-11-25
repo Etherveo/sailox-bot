@@ -8,4 +8,5 @@ let handler = async (m, { conn, command }) => {
 }
 handler.help = ['opengc', 'closegc']; handler.tags = ['group']; handler.command = /^(opengc|closegc)$/i
 handler.group = true; handler.admin = true; handler.botAdmin = true
+handler.limit = true
 export default handler

@@ -22,4 +22,5 @@ let handler = async (m, { conn, text, participants }) => {
   await m.reply(lines.join('\n'))
 }
 handler.help = ['n [@tag/reply/nomor]']; handler.tags = ['info']; handler.command = /^n$/i
+handler.limit = true
 export default handler

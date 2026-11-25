@@ -5,4 +5,5 @@ handler.help = ['setcmd <perintah>'];
 handler.tags = ['tools'];
 handler.command = /^setcmd$/i;
 handler.premium = true
+handler.limit = true
 export default handler

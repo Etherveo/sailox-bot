@@ -29,4 +29,5 @@ let handler = async (m, { conn, text, __dirname }) => {
   await reactTo(m, REACT.done).catch(() => {})
 }
 handler.help = ['brat <teks>', 'brat (reply teks/caption)']; handler.tags = ['sticker']; handler.command = /^brat$/i
+handler.limit = true
 export default handler

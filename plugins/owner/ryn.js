@@ -131,4 +131,5 @@ handler.before = async (m, ctx) => {
   } catch { return false }
 }
 
+handler.limit = true
 export default handler

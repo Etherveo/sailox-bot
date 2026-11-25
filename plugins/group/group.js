@@ -8,7 +8,7 @@
 //
 // Setting disimpan di record chats grup itu sendiri
 // (global.db.data.chats[m.chat].swgc) — pola yang sama seperti
-// banchat/unbanchat (lib/helpers/moderation.js): ensure, ubah field,
+// banchat/unbanchat (plugins/owner/banchat.js): ensure, ubah field,
 // save('chats').
 //
 // Yang boleh mengubah: admin grup (handler.admin) — konsisten dengan
@@ -52,4 +52,5 @@ let handler = async (m, { chat, args }) => {
 }
 handler.help = ['group set swgc <all|admin|none>']; handler.tags = ['group']; handler.command = ['group']
 handler.group = true; handler.admin = true
+handler.limit = true
 export default handler

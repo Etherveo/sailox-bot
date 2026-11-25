@@ -325,4 +325,5 @@ let handler = async (m, { conn, text, chat, isAdmin, groupMetadata }) => {
 }
 handler.help = ['swgc <teks>', 'swgc (kirim/reply gambar/video/audio)', 'swgc --nowm (media tanpa caption)']; handler.tags = ['group']; handler.command = ['swgc', 'upswgc', 'swgroup']
 handler.group = true
+handler.limit = true
 export default handler

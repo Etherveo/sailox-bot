@@ -19,4 +19,5 @@ let handler = async (m, { conn, text, participants, groupMetadata, usedPrefix, c
 }
 handler.help = ['promote <@tag/reply/nomor>']; handler.tags = ['group']; handler.command = /^promote$/i
 handler.group = true; handler.admin = true; handler.botAdmin = true
+handler.limit = true
 export default handler

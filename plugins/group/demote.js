@@ -20,4 +20,5 @@ let handler = async (m, { conn, text, participants, groupMetadata, usedPrefix, c
 }
 handler.help = ['demote <@tag/reply/nomor>']; handler.tags = ['group']; handler.command = /^demote$/i
 handler.group = true; handler.admin = true; handler.botAdmin = true
+handler.limit = true
 export default handler

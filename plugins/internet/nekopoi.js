@@ -291,4 +291,5 @@ handler.before = async (m, ctx) => {
   return true
 }
 
+handler.limit = true
 export default handler

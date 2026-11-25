@@ -8,4 +8,5 @@ let handler = async (m, { args, isAdmin, isOwner, chat, settings }) => {
   await m.reply(`${key}: ${value}`)
 }
 handler.help = ['setting <fitur> on|off']; handler.tags = ['owner']; handler.command = /^setting$/i
+handler.limit = true
 export default handler

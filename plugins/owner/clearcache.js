@@ -60,7 +60,7 @@ export function downloadsRoot(rootDir) {
 
 function assertInside(root, dir) {
   const rel = path.relative(root, dir)
-  if (rel.startsWith('..') || path.isAbsolute(rel)) throw new Error('Folder provider di luar folder downloads — ditolak.')
+  if (rel.startsWith('..') || path.isAbsolute(rel)) throw 'Folder provider di luar folder downloads — ditolak.'
 }
 
 // Folder provider yang ADA di disk: subdirektori langsung dari downloads
@@ -103,7 +103,7 @@ export async function clearProviderDir(rootDir, provider) {
     if (e.code === 'ENOENT') return { provider: name, removed: 0, freedBytes: 0, missing: true }
     throw e
   }
-  if (st.isSymbolicLink() || !st.isDirectory()) throw new Error(`Folder provider bukan direktori biasa: ${name}`)
+  if (st.isSymbolicLink() || !st.isDirectory()) throw `Folder provider bukan direktori biasa: ${name}`
   const entries = await fs.readdir(dir)
   let removed = 0
   let freedBytes = 0

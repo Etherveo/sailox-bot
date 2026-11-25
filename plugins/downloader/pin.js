@@ -100,4 +100,5 @@ handler.help = ['pin <link Pinterest>', 'pin <kata kunci>', 'pin <jumlah> <kata 
 handler.tags = ['downloader']
 handler.command = /^(pin|pinterest)$/i
 
+handler.limit = true
 export default handler

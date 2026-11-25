@@ -16,4 +16,5 @@ handler.tags = ['info']
 handler.command = new RegExp()
 handler.prefixless = /^(cek)?prefix$/i
 
+handler.limit = true
 export default handler

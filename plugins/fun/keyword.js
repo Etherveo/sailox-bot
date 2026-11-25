@@ -24,8 +24,8 @@ const UNSAFE_KEYS = new Set(['__proto__', 'prototype', 'constructor'])
 
 function normalizeKey(key) {
   const k = String(key ?? '').trim().toLowerCase()
-  if (!k) throw new Error('Keyword tidak boleh kosong.')
-  if (UNSAFE_KEYS.has(k)) throw new Error('Keyword tidak valid.')
+  if (!k) throw 'Keyword tidak boleh kosong.'
+  if (UNSAFE_KEYS.has(k)) throw 'Keyword tidak valid.'
   return k
 }
 
@@ -63,7 +63,7 @@ export function createKeywordStore({ filePath } = {}) {
   function add(key, value) {
     const k = normalizeKey(key)
     const v = String(value ?? '').trim()
-    if (!v) throw new Error('Keyword atau respon gak boleh kosong')
+    if (!v) throw 'Keyword atau respon gak boleh kosong'
     const map = load()
     map[k] = v
     save(map)
@@ -73,9 +73,9 @@ export function createKeywordStore({ filePath } = {}) {
   function edit(key, value) {
     const k = normalizeKey(key)
     const v = String(value ?? '').trim()
-    if (!v) throw new Error('Keyword atau respon gak boleh kosong')
+    if (!v) throw 'Keyword atau respon gak boleh kosong'
     const map = load()
-    if (!Object.hasOwn(map, k)) throw new Error('Keyword tidak ditemukan.')
+    if (!Object.hasOwn(map, k)) throw 'Keyword tidak ditemukan.'
     map[k] = v
     save(map)
     return v

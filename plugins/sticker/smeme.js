@@ -28,4 +28,5 @@ let handler = async (m, { conn, text, __dirname }) => {
   await reactTo(m, REACT.done).catch(() => {})
 }
 handler.help = ['smeme <teks_atas>|<teks_bawah> [-ukuran]']; handler.tags = ['sticker']; handler.command = /^smeme$/i
+handler.limit = true
 export default handler

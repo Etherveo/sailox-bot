@@ -82,4 +82,5 @@ handler.help = ['alarm <jam> [am/pm] [wib/wita/wit] ["pesan"] [-p/-d]', 'alarmch
 handler.tags = ['tools']
 handler.command = /^(alarm|alarmcheck|alarmdelete)$/i
 
+handler.limit = true
 export default handler

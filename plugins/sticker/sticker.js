@@ -38,4 +38,5 @@ let handler = async (m, { conn, text, __dirname }) => {
   await reactTo(m, REACT.done).catch(() => {})
 }
 handler.help = ['s (gambar/video/GIF/dokumen/once-view)', 's <pack> | <author>']; handler.tags = ['sticker']; handler.command = /^s(?:ti(?:c)?ker)?$/i
+handler.limit = true
 export default handler

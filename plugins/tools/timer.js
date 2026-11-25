@@ -74,4 +74,5 @@ handler.help = ['timer <durasi> ["pesan"] [-p/-d]', 'timercheck', 'timerdelete <
 handler.tags = ['tools']
 handler.command = /^(timer|timercheck|timerdelete)$/i
 
+handler.limit = true
 export default handler

@@ -3,4 +3,5 @@ let handler = async m => { await m.reply(`Pong!\nUptime: ${duration(process.upti
 handler.help = ['ping'];
 handler.tags = ['info'];
 handler.command = /^p(?:ing)?$/i
+handler.limit = true
 export default handler

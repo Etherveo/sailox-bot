@@ -23,4 +23,5 @@ let handler = async (m, { text, usedPrefix, command }) => {
 }
 handler.help = ['ukur <teks>', 'ukur (reply pesan)']; handler.tags = ['tools']; handler.command = /^ukur$/i
 handler.sharing = true
+handler.limit = true
 export default handler

@@ -28,7 +28,8 @@ Alternatif noninteraktif: `npm start -- --login pairing --phone <digit-nomor>` a
 | `.saveplugin nama` | Owner; balas kode atau lampiran `.js`, atau taruh kode sesudah nama |
 | `.getplugin nama`, `.deleteplugin nama` | Owner; dukung `kategori/nama` untuk pencarian |
 | `.banuser target`, `.unbanuser target` | Owner; target harus terpetakan ke LID |
-| `.banchat`, `.unbanchat` | Owner; di grup yang akan diubah |
+| `.banchat [nomor/jid/lid]`, `.unbanchat [nomor/jid/lid]` | Owner; tanpa argumen = chat saat ini, reply = DM orang itu |
+| `.addpremium <target> <durasi>`, `.delpremium <target>` | Owner; alias `.addprem`/`.delprem`; durasi 1d/1w/1m (30 hari), bisa digabung (1w 5d); target reply/tag/nomor |
 | `.self`, `.public` | Owner; mode tersimpan per bot |
 | `.setprefix !`, `.setprefix reset` | Owner; ubah/reset prefix |
 | `.setting fitur on/off` | Untuk fitur grup: admin grup/owner; pengaturan bot: owner |

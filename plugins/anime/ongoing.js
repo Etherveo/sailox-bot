@@ -28,4 +28,8 @@ handler.help = ['ongoing [halaman]']
 handler.tags = ['anime']
 handler.command = /^ongoing$/i
 
+handler.limit = true
+// Dimatikan sementara (keputusan Veo 2026-11-25): Kuramanime masih
+// error (HTTP 403 dari Cloudflare) — jangan dulu dikasih akses.
+handler.disabled = true
 export default handler

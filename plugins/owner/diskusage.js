@@ -36,10 +36,10 @@ export async function resolveTarget(target, root = DEFAULT_ROOT) {
   const abs = path.resolve(ROOT, (target ?? '').trim() || '.')
   const rel = path.relative(ROOT, abs)
   if (rel === '..' || rel.startsWith('..' + path.sep) || path.isAbsolute(rel)) {
-    throw new Error(`Path di luar root project ditolak: ${target}`)
+    throw `Path di luar root project ditolak: ${target}`
   }
   if (rel.split(path.sep)[0] === 'sessions') {
-    throw new Error('Folder sessions/ tidak bisa diakses lewat perintah file (keamanan akun).')
+    throw 'Folder sessions/ tidak bisa diakses lewat perintah file (keamanan akun).'
   }
   // Symlink yang menembus keluar root ikut ditolak (cek realpath target
   // yang sudah ada; untuk target baru, cek realpath leluhur terdekatnya).
@@ -49,10 +49,10 @@ export async function resolveTarget(target, root = DEFAULT_ROOT) {
       const real = await fs.realpath(probe)
       const rrel = path.relative(ROOT, real)
       if (rrel === '..' || rrel.startsWith('..' + path.sep) || path.isAbsolute(rrel)) {
-        throw new Error(`Path menembus keluar root project (symlink): ${target}`)
+        throw `Path menembus keluar root project (symlink): ${target}`
       }
       if (rrel.split(path.sep)[0] === 'sessions') {
-        throw new Error('Folder sessions/ tidak bisa diakses lewat perintah file (keamanan akun).')
+        throw 'Folder sessions/ tidak bisa diakses lewat perintah file (keamanan akun).'
       }
       break
     } catch (e) {
@@ -106,7 +106,7 @@ export async function diskUsage(target, root = DEFAULT_ROOT) {
   try {
     stat = await fs.stat(abs)
   } catch {
-    throw new Error('Path tidak ditemukan.')
+    throw 'Path tidak ditemukan.'
   }
   const result = stat.isDirectory() ? await scanDir(abs) : { size: stat.size, files: 1, dirs: 0 }
   return { path: abs, isDirectory: stat.isDirectory(), ...result }
@@ -132,7 +132,10 @@ let handler = async (m, { conn, text }) => {
     await reactTo(m, REACT.done).catch(() => {})
   } catch (e) {
     await reactTo(m, REACT.error).catch(() => {})
-    throw typeof e === 'string' ? e : e.message
+    // Teruskan apa adanya: string kebijakan (validasi path) sampai ke
+    // sender lewat pipeline; Error beneran (mis. gagal baca disk) tetap
+    // Error supaya pipeline mengirim generik + laporan raw ke owner.
+    throw e
   }
 }
 

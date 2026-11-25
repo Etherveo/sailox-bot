@@ -14,4 +14,5 @@ let handler = async (m, { conn, text, usedPrefix, command }) => {
 }
 handler.help = ['setdesc <teks>']; handler.tags = ['group']; handler.command = /^(setdesc|sdesc)$/i
 handler.group = true; handler.admin = true; handler.botAdmin = true
+handler.limit = true
 export default handler

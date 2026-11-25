@@ -22,4 +22,5 @@ let handler = async (m, { conn, text, participants, groupMetadata, usedPrefix, c
 }
 handler.help = ['kick <@tag/reply/nomor>']; handler.tags = ['group']; handler.command = /^ki(c)?k$/i
 handler.group = true; handler.admin = true; handler.botAdmin = true
+handler.limit = true
 export default handler

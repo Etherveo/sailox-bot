@@ -114,7 +114,7 @@ let handler = async (m, ctx) => {
   } catch (e) {
     if (!access.exempt) { releaseAnimeDownload(ctx.userData); await saveAnimeUser() }
     if (e?.code === 'NO_CONN') throw '❌ Koneksi WhatsApp belum siap untuk mengunduh.'
-    return m.reply(`❌ Unduhan gagal:\n${e.message || e}`)
+    throw `❌ Unduhan gagal:\n${e.message || e}`
   }
   if (!access.exempt) {
     if (!['file', 'media-batch', 'batch'].includes(result?.kind)) releaseAnimeDownload(ctx.userData)
@@ -211,4 +211,8 @@ handler.before = async (m, ctx) => {
   return true
 }
 
+handler.limit = true
+// Dimatikan sementara (keputusan Veo 2026-11-25): Kuramanime masih
+// error (HTTP 403 dari Cloudflare) — jangan dulu dikasih akses.
+handler.disabled = true
 export default handler

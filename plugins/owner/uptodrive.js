@@ -56,16 +56,16 @@ let handler = async (m, { conn, text }) => {
   let abs, st
   if (/^\d+$/.test(target)) {
     const entry = listing.entries[Number(target) - 1]
-    if (!entry) throw new Error(`Item nomor ${target} tidak ditemukan di folder ini.`)
+    if (!entry) throw `Item nomor ${target} tidak ditemukan di folder ini.`
     abs = path.join(listing.path, entry.name)
     st = await ops.fileOp('stat', abs)
   } else {
     st = await ops.fileOp('stat', target)
-    if (!st.exists) throw new Error(`File/folder tidak ditemukan: ${target}`)
+    if (!st.exists) throw `File/folder tidak ditemukan: ${target}`
     abs = st.path
   }
-  if (st.type !== 'file' && st.type !== 'dir') throw new Error('Target tidak valid (bukan file/folder).')
-  if (st.type === 'file' && st.size > MAX_UPLOAD_BYTES) throw new Error('❌ File melebihi batas maksimum 10 GiB.')
+  if (st.type !== 'file' && st.type !== 'dir') throw 'Target tidak valid (bukan file/folder).'
+  if (st.type === 'file' && st.size > MAX_UPLOAD_BYTES) throw '❌ File melebihi batas maksimum 10 GiB.'
 
   const dest = defaultTargetFolderId(destArg)
   const client = global.uptodriveClient ?? getDriveClient({ rootDir: projectRoot() })

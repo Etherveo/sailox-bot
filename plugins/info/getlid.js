@@ -4,4 +4,5 @@ let handler = async (m, { conn, text, participants }) => {
   await m.reply(`LID: ${result.lid || 'belum diketahui'}\nJID: ${result.jid || 'belum diketahui'}`)
 }
 handler.help = ['getlid [nomor/mention]']; handler.tags = ['info']; handler.command = /^getlid$/i
+handler.limit = true
 export default handler

@@ -835,7 +835,8 @@ deleteUpdate(upd):   // dari messages.update: key = pesan asli (id, chat); updat
 | `info/ping.js` | uji respons dan uptime |
 | `info/getlid.js` | tampilkan LID dan JID pengirim/target (membantu mengisi config) |
 | `owner/saveplugin.js`, `getplugin.js`, `deleteplugin.js` | CRUD plugin (9.10) |
-| `owner/banuser.js`, `unbanuser.js`, `banchat.js`, `unbanchat.js` | moderasi lewat `identity.resolve` |
+| `owner/banuser.js`, `unbanuser.js`, `banchat.js` (.banchat + .unbanchat) | moderasi lewat `identity.resolve` |
+| `owner/premium.js` (.addpremium/.addprem + .delpremium/.delprem) | beri/cabut premium dengan durasi d/w/m (multi-label), lewat `identity.resolve` |
 | `owner/self.js` | toggle `settings.self` (self/public), persisten |
 | `owner/setprefix.js` | ubah `settings.prefix`, persisten |
 | `group/_antilink.js` | contoh hook `before` |

@@ -312,4 +312,5 @@ handler.tags = ['downloader']
 handler.command = /^(download|dl)$/i
 handler.bigSend = true
 
+handler.limit = true
 export default handler

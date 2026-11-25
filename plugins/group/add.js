@@ -32,4 +32,5 @@ let handler = async (m, { conn, text, participants, groupMetadata, usedPrefix, c
 }
 handler.help = ['add <nomor/@tag/reply>']; handler.tags = ['group']; handler.command = /^(add|tambah)$/i
 handler.group = true; handler.admin = true; handler.botAdmin = true
+handler.limit = true
 export default handler

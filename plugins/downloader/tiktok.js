@@ -180,9 +180,12 @@ let handler = async (m, ctx) => {
     status = 'failed'
     // Log mentah (terminal) + laporan guardian ke DM founder — bukan
     // cuma pesan generik dispatcher — supaya akar kegagalan berikutnya
-    // langsung terbaca (standar error-logging downloader Veo).
+    // langsung terbaca (standar error-logging downloader Veo). Pesan
+    // kebijakan (string, mis. antrean penuh dari queue.enqueue) BUKAN
+    // error: tidak dilaporkan ke founder (aturan Veo 2026-11-25) —
+    // cukup log terminal, lalu dilempar lagi apa adanya.
     console.error('[.tt] gagal:', e)
-    void reportEngineError({ engineId: 'tiktok', phase: 'send', error: e, url }).catch(() => {})
+    if (e instanceof Error) void reportEngineError({ engineId: 'tiktok', phase: 'send', error: e, url }).catch(() => {})
     await reactTo(m, REACT.error).catch(() => {})
     throw e
   } finally {
@@ -227,4 +230,5 @@ handler.before = async (m, ctx) => {
 handler.help = ['tiktok <link tiktok>']
 handler.tags = ['downloader']
 handler.command = /^(tiktok|tt)$/i
+handler.limit = true
 export default handler
