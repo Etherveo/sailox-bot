@@ -11,5 +11,4 @@ let handler = async (m, { conn, usedPrefix, command }) => {
 }
 handler.help = ['setppgrup (kirim/reply gambar)']; handler.tags = ['group']; handler.command = /^(setppgrup|setppgc)$/i
 handler.group = true; handler.admin = true; handler.botAdmin = true
-handler.limit = true
 export default handler

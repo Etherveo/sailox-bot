@@ -54,6 +54,13 @@ let handler = async (m, ctx) => {
   }
 
   if (command === 'alarmcheck') {
+    // Cek daftar alarm bebas limit (keputusan Veo 2026-11-25) — mekanisme
+    // no-consume yang sama seperti langkah sesi .sa: handler membebaskan
+    // pemakaian ini dengan m.limit = 0. Catatan: pra-cek di
+    // permissionFailure tetap memakai handler.limit statis, jadi user
+    // dengan limit 0 tetap ditolak sebelum handler jalan (butuh >= 1
+    // untuk memulai); yang dibebaskan adalah potongannya.
+    m.limit = 0
     const list = sortedAlarms(u)
     if (!list.length) return m.reply(`Kamu belum punya alarm aktif. Pasang dengan ${usedPrefix}alarm <jam>, mis. ${usedPrefix}alarm 10:30 pm wita.`)
     const lines = list.map((a, i) =>

@@ -255,7 +255,7 @@ let handler = async (m, ctx) => {
 }
 
 handler.help = ['nekopoi search <judul>', 'nekopoi detail <url>']
-handler.tags = ['internet']
+handler.tags = ['nsfw']
 handler.command = /^nekopoi$/i
 handler.premium = true
 

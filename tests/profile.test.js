@@ -30,13 +30,13 @@ function baseUser(patch = {}) {
   return { name: 'Veo', age: 20, registered: true, regTime: NOW - 30 * 86400_000, level: 5, exp: 120, limit: 37, premium: false, premiumTime: 0, ...patch }
 }
 
-test('command: .profile saja, biaya limit 1', () => {
+test('command: .profile saja, bebas limit', () => {
   assert.equal(handler.command.test('profile'), true)
   assert.equal(handler.command.test('Profile'), true)
   assert.equal(handler.command.test('profil'), true)
   assert.equal(handler.command.test('Profil'), true)
   assert.equal(handler.command.test('profilex'), false)
-  assert.equal(handler.limit, true)
+  assert.equal(handler.limit, undefined, 'bebas limit — keputusan Veo 2026-11-25')
   assert.deepEqual(handler.tags, ['info'])
 })
 

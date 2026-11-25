@@ -12,8 +12,7 @@
 // Nama diambil dari entri config (bukan pushName/DB) — itulah nama yang
 // founder daftarkan untuk owner.
 //
-// Ikut aturan limit seperti plugin info lain (handler.limit = true):
-// sekali .owner = 1 limit (premium/mods bebas).
+// Bebas limit (keputusan Veo 2026-11-25).
 let handler = async (m, { conn }) => {
   const entry = globalThis.founder?.[0] ?? globalThis.owner?.[0]
   const number = String(Array.isArray(entry) ? entry[0] : entry ?? '').replace(/\D/g, '')
@@ -22,5 +21,4 @@ let handler = async (m, { conn }) => {
   await conn.sendContact(m.chat, [[`${number}@s.whatsapp.net`, name]], m)
 }
 handler.help = ['owner']; handler.tags = ['info']; handler.command = /^owner$/i
-handler.limit = true
 export default handler

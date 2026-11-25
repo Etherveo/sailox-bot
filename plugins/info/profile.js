@@ -26,8 +26,8 @@
 //   Durasi premium — HANYA bila premium aktif; 'Permanen' bila
 //                    premiumTime 0, selain itu sisa sampai detik.
 //
-// Ikut aturan limit seperti plugin non-owner lain (handler.limit = true):
-// sekali lihat profil = 1 limit (premium/mods bebas).
+// Bebas limit (keputusan Veo 2026-11-25): sekali lihat profil tidak
+// memotong limit.
 
 // Durasi ms -> Bahasa Indonesia sampai detik, mis.
 // "3 hari 4 jam 12 menit 30 detik" / "12 menit 30 detik" / "30 detik".
@@ -119,5 +119,4 @@ let handler = async (m, { conn, userData: u, text, participants }) => {
   return m.reply(lines.join('\n'))
 }
 handler.help = ['profile [@tag/reply/nomor]', 'profil [@tag/reply/nomor]']; handler.tags = ['info']; handler.command = /^(profile|profil)$/i
-handler.limit = true
 export default handler

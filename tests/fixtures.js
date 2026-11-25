@@ -4,8 +4,8 @@ import { decorateSocket, serialize } from '../lib/simple.js'
 import { createStore } from '../lib/store.js'
 import { OutboundQueue } from '../lib/helpers/queue.js'
 export const PN = '6281234567890@s.whatsapp.net', LID = '10001@lid', BOTPN = '6282234567890@s.whatsapp.net', BOTLID = '20002@lid', GROUP = '123456789@g.us'
-export function raw(text = '.ping', { group = false, fromMe = false, id = 'msg1', timestamp = Date.now() / 1000, alt = true, message } = {}) {
-  const m = proto.WebMessageInfo.fromObject({ key: { id, remoteJid: group ? GROUP : PN, fromMe, ...(group ? { participant: PN } : {}) }, messageTimestamp: timestamp, pushName: 'Test', message: message ?? { conversation: text } })
+export function raw(text = '.ping', { group = false, fromMe = false, id = 'msg1', timestamp = Date.now() / 1000, alt = true, message, participant } = {}) {
+  const m = proto.WebMessageInfo.fromObject({ key: { id, remoteJid: group ? GROUP : PN, fromMe, ...(group ? { participant: participant ?? PN } : {}) }, messageTimestamp: timestamp, pushName: 'Test', message: message ?? { conversation: text } })
   if (alt) m.key[group ? 'participantAlt' : 'remoteJidAlt'] = LID
   return m
 }

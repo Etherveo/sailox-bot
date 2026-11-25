@@ -6,5 +6,4 @@ let handler = async (m, { conn, groupMetadata }) => {
 }
 handler.help = ['linkgc']; handler.tags = ['group']; handler.command = /^(linkgc|linkgrup|gclink)$/i
 handler.group = true; handler.admin = true; handler.botAdmin = true
-handler.limit = true
 export default handler

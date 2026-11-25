@@ -12,5 +12,4 @@ let handler = async (m, { conn, text, usedPrefix, command }) => {
 }
 handler.help = ['setnamagrup <nama baru>']; handler.tags = ['group']; handler.command = /^(setnamagrup|setnamagc)$/i
 handler.group = true; handler.admin = true; handler.botAdmin = true
-handler.limit = true
 export default handler

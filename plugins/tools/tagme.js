@@ -15,5 +15,4 @@ let handler = async (m, { conn, text, participants }) => {
 }
 handler.help = ['tagme [@tag/reply/nomor]']; handler.tags = ['tools', 'info']; handler.command = /^tagme$/i
 handler.sharing = true
-handler.limit = true
 export default handler

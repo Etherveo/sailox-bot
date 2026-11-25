@@ -23,12 +23,12 @@ async function withConfig({ founder, owner }, fn) {
   }
 }
 
-test('command: .owner saja, biaya limit 1, tag info', () => {
+test('command: .owner saja, bebas limit, tag info', () => {
   assert.equal(handler.command.test('owner'), true)
   assert.equal(handler.command.test('Owner'), true)
   assert.equal(handler.command.test('ownerx'), false)
   assert.equal(handler.command.test('owners'), false)
-  assert.equal(handler.limit, true)
+  assert.equal(handler.limit, undefined, 'bebas limit — keputusan Veo 2026-11-25')
   assert.deepEqual(handler.tags, ['info'])
   assert.deepEqual(handler.help, ['owner'])
 })

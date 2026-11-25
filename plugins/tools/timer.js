@@ -46,6 +46,13 @@ let handler = async (m, ctx) => {
   }
 
   if (command === 'timercheck') {
+    // Cek daftar timer bebas limit (keputusan Veo 2026-11-25) — mekanisme
+    // no-consume yang sama seperti langkah sesi .sa: handler membebaskan
+    // pemakaian ini dengan m.limit = 0. Catatan: pra-cek di
+    // permissionFailure tetap memakai handler.limit statis, jadi user
+    // dengan limit 0 tetap ditolak sebelum handler jalan (butuh >= 1
+    // untuk memulai); yang dibebaskan adalah potongannya.
+    m.limit = 0
     const list = sortedTimers(u)
     if (!list.length) return m.reply(`Kamu belum punya timer aktif. Pasang dengan ${usedPrefix}timer <durasi>, mis. ${usedPrefix}timer 15m.`)
     const lines = list.map((t, i) =>

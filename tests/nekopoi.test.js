@@ -53,6 +53,12 @@ const DETAIL_HTML = `
 <a class="nk-episode-prev" href="https://nekopoi.care/ep-sebelum/"><span>Episode 0</span></a>
 <a class="nk-episode-next" href="https://nekopoi.care/ep-sesudah/"><span>Episode 2</span></a>`
 
+test('metadata: tag nsfw (bukan internet), file tetap di plugins/internet/', () => {
+  assert.deepEqual(nekopoiHandler.tags, ['nsfw'], 'tag menu pindah ke NSFW — keputusan Veo 2026-11-25')
+  assert.equal(nekopoiHandler.premium, true, 'gerbang premium tidak berubah')
+  assert.equal(nekopoiHandler.nsfw, undefined, 'tags BUKAN gerbang nsfw — gerbang itu handler.nsfw (permissions.js), tidak ditambahkan')
+})
+
 test('isNekopoiUrl: hanya https di host nekopoi.care', () => {
   assert.equal(isNekopoiUrl('https://nekopoi.care/judul-satu/'), true)
   assert.equal(isNekopoiUrl('https://www.nekopoi.care/x'), true)

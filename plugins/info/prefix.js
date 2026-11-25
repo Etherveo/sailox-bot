@@ -12,9 +12,11 @@ let handler = async (m, { conn }) => {
 }
 
 handler.help = ['cekprefix', 'prefix']
-handler.tags = ['info']
+// Prefixless (handler.prefixless di bawah): tampil di menu di bawah
+// kategori 'Tanpa Prefix', bukan 'info' — plugin tanpa prefix jangan
+// masuk kategori lain (keputusan Veo 2026-11-25).
+handler.tags = ['prefixless']
 handler.command = new RegExp()
 handler.prefixless = /^(cek)?prefix$/i
 
-handler.limit = true
 export default handler

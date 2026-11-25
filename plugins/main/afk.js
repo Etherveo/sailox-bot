@@ -137,5 +137,4 @@ handler.help = ['afk [alasan]', 'brb [alasan]', 'off [alasan]']
 handler.tags = ['main']
 handler.command = /^(afk|brb|off)$/i
 
-handler.limit = true
 export default handler

@@ -51,6 +51,16 @@ test('nomor & alias menyelesaikan kategori yang sama seperti nama', () => {
   assert.match(byAlias, /• ❳ \.stiker/, 'plugin multi-tag tampil di tiap kategorinya')
 })
 
+test('prefixless: plugin tanpa prefix masuk kategori Tanpa Prefix, bukan info', () => {
+  const prefixless = { help: ['cekprefix', 'prefix'], tags: ['prefixless'] }
+  const grouped = groupPluginHelp([prefixless, ...plugins])
+  assert.deepEqual(grouped.get('prefixless'), ['cekprefix', 'prefix'])
+  assert.ok(!grouped.get('info')?.includes('cekprefix'), 'cekprefix tidak boleh tampil di Info')
+  const text = buildMenuText({ ...base, plugins: [prefixless], input: '' })
+  assert.match(text, /Tanpa Prefix — 2 perintah/)
+  assert.doesNotMatch(text, /Info —/)
+})
+
 test('input tak dikenal jatuh ke navigasi', () => {
   const text = buildMenuText({ ...base, input: 'kategori-ngawur' })
   assert.match(text, /Quick Navigation/)

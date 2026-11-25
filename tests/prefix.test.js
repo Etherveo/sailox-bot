@@ -22,11 +22,12 @@ test('prefixless (cek)?prefix: prefix dan cekprefix cocok, sisanya tidak', () =>
   }
 })
 
-test('metadata plugin: help memuat kedua ejaan, normalize mempertahankan prefixless', () => {
+test('metadata plugin: help memuat kedua ejaan, normalize mempertahankan prefixless, tag prefixless', () => {
   const plugin = normalizePlugin({ default: handler })
   assert.ok(plugin)
   assert.deepEqual(plugin.help, ['cekprefix', 'prefix'])
   assert.equal(plugin.prefixless.source, '^(cek)?prefix$')
+  assert.deepEqual(plugin.tags, ['prefixless'], 'plugin prefixless tampil di kategori Tanpa Prefix, bukan info')
 })
 
 test('balasan menampilkan prefix aktif (string / RegExp / array)', async () => {

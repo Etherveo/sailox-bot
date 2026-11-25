@@ -834,8 +834,10 @@ deleteUpdate(upd):   // dari messages.update: key = pesan asli (id, chat); updat
 | `main/register.js` | pendaftaran user (`registered`) |
 | `info/ping.js` | uji respons dan uptime |
 | `info/getlid.js` | tampilkan LID dan JID pengirim/target (membantu mengisi config) |
+| `info/pay.js` (.pay/.qris + .setqris) | kirim gambar QRIS; owner ganti gambar via kirim/reply gambar (tulis timpa Payment.jpg) |
 | `owner/saveplugin.js`, `getplugin.js`, `deleteplugin.js` | CRUD plugin (9.10) |
 | `owner/banuser.js`, `unbanuser.js`, `banchat.js` (.banchat + .unbanchat) | moderasi lewat `identity.resolve` |
+| `owner/odelete.js` (odelete: d/del/delete tanpa prefix, sebagai reply) | varian owner `.delete`: batasan admin dilepas (target siapa pun; pesan bot boleh dihapus di grup); bot harus admin untuk pesan orang lain |
 | `owner/premium.js` (.addpremium/.addprem + .delpremium/.delprem) | beri/cabut premium dengan durasi d/w/m (multi-label), lewat `identity.resolve` |
 | `owner/self.js` | toggle `settings.self` (self/public), persisten |
 | `owner/setprefix.js` | ubah `settings.prefix`, persisten |

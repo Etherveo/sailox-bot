@@ -52,5 +52,4 @@ let handler = async (m, { chat, args }) => {
 }
 handler.help = ['group set swgc <all|admin|none>']; handler.tags = ['group']; handler.command = ['group']
 handler.group = true; handler.admin = true
-handler.limit = true
 export default handler

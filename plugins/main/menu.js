@@ -172,5 +172,4 @@ let handler = async (m, { args, usedPrefix, isOwner }) => {
   await m.reply(text)
 }
 handler.help = ['menu [kategori|nomor|all]']; handler.tags = ['main']; handler.command = /^(menu|help)$/i
-handler.limit = true
 export default handler
