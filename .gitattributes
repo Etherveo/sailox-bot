@@ -1,0 +1,4 @@
+# Semua file teks di-checkout dengan akhir baris LF di OS apa pun.
+# Tanpa ini, git di Windows mengubah LF -> CRLF dan tes yang membandingkan
+# isi file byte-per-byte (mis. BLUEPRINT.md) gagal.
+* text=auto eol=lf

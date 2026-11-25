@@ -58,3 +58,11 @@ test('actual worker self-check with Permission Model: imports, isolated env/db, 
 })
 test('policy scans relative dependency code before any plugin import', async t => { const root = await temp(t); await fs.writeFile(path.join(root, 'evil.js'), "import cp from 'node:child_process'; export default cp"); const { validatePolicyTree } = await import('../lib/subbot/policy.js'); await assert.rejects(validatePolicyTree({ root, id: 'custom.js', code: "import x from './evil.js'; export default async () => {}", allowCustomPlugins: true }), /Import tidak diizinkan/); await fs.writeFile(path.join(root, 'safe.js'), 'export const text = "hello"'); await validatePolicyTree({ root, id: 'custom.js', code: "import { text } from './safe.js'; export default async m => m.reply(text)", allowCustomPlugins: true }) })
 test('package allowlist cannot reopen dangerous Node builtins or core path traversal', () => { assert.throws(() => inspectPolicy("import cp from 'child_process'", { allowedPackages: ['child_process'] })); assert.throws(() => inspectPolicy("import c from '#lib/../config.js'")) })
+
+test('sandboxPath menerima jalur relatif Windows (backslash) dan tetap menolak traversal', async t => {
+  const root = await temp(t)
+  assert.equal(await sandboxPath(root, 'plugins\\qrcode.js'), path.join(root, 'plugins', 'qrcode.js'))
+  assert.equal(await sandboxPath(root, 'plugins/qrcode.js'), path.join(root, 'plugins', 'qrcode.js'))
+  await assert.rejects(sandboxPath(root, '..\\escape.js'), /Path sandbox tidak valid/)
+  await assert.rejects(sandboxPath(root, '../escape.js'), /Path sandbox tidak valid/)
+})

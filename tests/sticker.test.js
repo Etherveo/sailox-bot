@@ -5,7 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { parseStickerArgs, assertVideoLimits, addExifToWebp, extractStickerMeta, parseWebpChunks, mediaToSticker, ffmpegAvailable, pillowAvailable, isAnimatedWebp, webpFrameDurations, webpAnimatedToGif, MAX_VIDEO_BYTES, MAX_VIDEO_SECONDS } from '../lib/media/sticker.js'
+import { parseStickerArgs, assertVideoLimits, addExifToWebp, extractStickerMeta, parseWebpChunks, mediaToSticker, ffmpegAvailable, pillowAvailable, pythonCmd, isAnimatedWebp, webpFrameDurations, webpAnimatedToGif, MAX_VIDEO_BYTES, MAX_VIDEO_SECONDS } from '../lib/media/sticker.js'
 
 const execFileP = promisify(execFile)
 // WebP 512x512 hasil ffmpeg (VP8X+ALPH+VP8) dan PNG 1x1, fixture tetap.
@@ -88,8 +88,11 @@ test('mediaToSticker video: 1 detik lolos, 10 detik ditolak oleh ffprobe (butuh 
 
 // ── WebP animasi (dokumen .webp): decoder WebP bawaan ffmpeg tidak bisa
 // membacanya, jadi dinormalisasi ke GIF via Pillow lalu jadi stiker animasi.
-async function makeWebp(t, root, { animated, seconds = 2 }) {
-  if (!await ffmpegAvailable()) return t.skip('ffmpeg tidak tersedia')
+async function makeWebp(root, { animated, seconds = 2 }) {
+  // JANGAN t.skip() di sini: skip di dalam helper tidak menghentikan tes
+  // (tes lanjut dengan buffer undefined lalu gagal di assert). Tes yang
+  // memakai helper ini WAJIB cek ffmpegAvailable() sendiri di awal.
+  if (!await ffmpegAvailable()) throw new Error('ffmpeg tidak tersedia di server — siapkan ffmpeg dulu (tes ini butuh ffmpeg untuk membuat fixture WebP).')
   const file = path.join(root, animated ? 'anim.webp' : 'stat.webp')
   const args = ['-y', '-v', 'error', '-f', 'lavfi', '-i', `color=c=red:s=64x64:d=${seconds}:r=5`, '-c:v', 'libwebp', '-pix_fmt', 'yuva420p', '-loop', '0']
   if (!animated) args.push('-frames:v', '1')
@@ -99,10 +102,11 @@ async function makeWebp(t, root, { animated, seconds = 2 }) {
 }
 
 test('isAnimatedWebp + webpFrameDurations: animasi terdeteksi, statis tidak', async t => {
+  if (!await ffmpegAvailable()) return t.skip('ffmpeg tidak tersedia')
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'sticker-tes-'))
   try {
-    const anim = await makeWebp(t, root, { animated: true })
-    const stat = await makeWebp(t, root, { animated: false })
+    const anim = await makeWebp(root, { animated: true })
+    const stat = await makeWebp(root, { animated: false })
     assert.equal(isAnimatedWebp(anim), true)
     assert.equal(isAnimatedWebp(stat), false)
     assert.equal(isAnimatedWebp(Buffer.from(PNG_B64, 'base64')), false)
@@ -114,10 +118,11 @@ test('isAnimatedWebp + webpFrameDurations: animasi terdeteksi, statis tidak', as
 })
 
 test('webpAnimatedToGif: WebP animasi -> GIF ber-frame + durasi (butuh ffmpeg + Pillow)', async t => {
+  if (!await ffmpegAvailable()) return t.skip('ffmpeg tidak tersedia')
   if (!await pillowAvailable()) return t.skip('Pillow tidak tersedia')
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'sticker-tes-'))
   try {
-    const anim = await makeWebp(t, root, { animated: true })
+    const anim = await makeWebp(root, { animated: true })
     const { gif, frames, durationMs } = await webpAnimatedToGif(anim, { root })
     assert.equal(gif.subarray(0, 6).toString('ascii'), 'GIF89a')
     assert.ok(frames > 1, 'GIF mempertahankan frame animasi')
@@ -126,10 +131,11 @@ test('webpAnimatedToGif: WebP animasi -> GIF ber-frame + durasi (butuh ffmpeg + 
 })
 
 test('mediaToSticker gambar: WebP animasi -> stiker animasi ber-EXIF (butuh ffmpeg + Pillow)', async t => {
+  if (!await ffmpegAvailable()) return t.skip('ffmpeg tidak tersedia')
   if (!await pillowAvailable()) return t.skip('Pillow tidak tersedia')
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'sticker-tes-'))
   try {
-    const anim = await makeWebp(t, root, { animated: true })
+    const anim = await makeWebp(root, { animated: true })
     const out = await mediaToSticker(anim, { kind: 'image', root, packname: 'Pack Tes', author: 'Ryn', packId: 'tes-anim' })
     assert.ok(parseWebpChunks(out).some(c => c.tag === 'ANIM'), 'hasilnya WebP animasi')
     assert.equal(extractStickerMeta(out)['sticker-pack-name'], 'Pack Tes')
@@ -137,9 +143,23 @@ test('mediaToSticker gambar: WebP animasi -> stiker animasi ber-EXIF (butuh ffmp
 })
 
 test('webpAnimatedToGif: WebP animasi >=10 detik ditolak (butuh ffmpeg)', async t => {
+  if (!await ffmpegAvailable()) return t.skip('ffmpeg tidak tersedia')
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'sticker-tes-'))
   try {
-    const long = await makeWebp(t, root, { animated: true, seconds: 11 })
+    const long = await makeWebp(root, { animated: true, seconds: 11 })
     await assert.rejects(() => webpAnimatedToGif(long, { root }), /di bawah 10 detik/)
   } finally { await fs.rm(root, { recursive: true, force: true }) }
+})
+
+test('pythonCmd: python3 dulu, lalu python/py; null bila tidak ada interpreter', async t => {
+  const cmd = await pythonCmd()
+  assert.ok(['python3', 'python', 'py', null].includes(cmd), `pythonCmd() = ${cmd}`)
+  if (cmd) await execFileP(cmd, ['-c', 'pass'])
+  // Tanpa interpreter sama sekali di PATH -> null (bukan throw).
+  const savedPath = process.env.PATH
+  const emptyDir = await fs.mkdtemp(path.join(os.tmpdir(), 'sticker-nopy-'))
+  try {
+    process.env.PATH = emptyDir
+    assert.equal(await pythonCmd(), null)
+  } finally { process.env.PATH = savedPath; await fs.rm(emptyDir, { recursive: true, force: true }) }
 })

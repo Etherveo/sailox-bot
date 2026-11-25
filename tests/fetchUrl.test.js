@@ -1,5 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { fileURLToPath } from 'node:url'
 import { mimeToExt, parseFetchArgs, planFetch, MAX_REPLY_CHARS } from '../plugins/tools/fetch.js'
 
 test('mimeToExt: peta umum + fallback bin + abaikan parameter', () => {
@@ -54,7 +55,7 @@ test('planFetch: tipe lain menjadi dokumen berketerangan', () => {
 test('plugin tools/fetch.js terdaftar owner-only dan terimpor lewat loader', async () => {
   const { createPluginLoader } = await import('../lib/plugins/loader.js')
   const errors = []
-  const loader = createPluginLoader({ root: new URL('../plugins/', import.meta.url).pathname, publish: false, onError: e => errors.push(e), warn: () => {} })
+  const loader = createPluginLoader({ root: fileURLToPath(new URL('../plugins/', import.meta.url)), publish: false, onError: e => errors.push(e), warn: () => {} })
   const r = await loader.reload('tools/fetch.js')
   assert.equal(r.ok, true, 'plugin fetch harus bisa dimuat')
   const plugin = loader.get('tools/fetch.js')
