@@ -13,8 +13,8 @@ import { buildStickerExif, extractStickerMeta, addExifToWebp } from '../lib/medi
 const WEBP_B64 = 'UklGRj4CAABXRUJQVlA4WAoAAAAQAAAA/wEA/wEAQUxQSBsAAAABBxARERAIJPt7z1BE/zP+85///Oc///nP/wEAVlA4IPwBAABQOgCdASoAAgACPpFIoU0lpCMiIAgAsBIJaW7hd2EbQAnsA99snIe+2TkPfbJyHvtk5D32ych77ZOQ99snIe+2TkPfbJyHvtk5D32ych77ZOQ99snIe+2TkPfbJyHvtk5D32ych77ZOQ99snIe+2TkPfbJyHvtk5D32ych6wAAP7/3giqsgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
 const PNG_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGNgAAIAAAUAAXpeqz8AAAAASUVORK5CYII='
 
-test('command: .sa + alias Yue, case-insensitive, tanpa false positive', () => {
-  for (const cmd of ['sa', 'SA', 'Sa', 'audiosticker', 'AUDIOSTICKER', 'asticker', 'astiker', 'saudio', 'stickeraudio']) {
+test('command: .sa + alias audio, case-insensitive, tanpa false positive', () => {
+  for (const cmd of ['sa', 'SA', 'Sa', 'saudio', 'stickeraudio', 'stikeraudio']) {
     assert.equal(handler.command.test(cmd), true, cmd)
   }
   for (const cmd of ['s', 'sax', 'asa', 'stickeraudio2', 'sa2', '', 'sticker']) {
