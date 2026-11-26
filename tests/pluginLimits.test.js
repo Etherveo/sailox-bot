@@ -40,6 +40,7 @@ const FREE_LIMIT_PLUGINS = new Set([
   'group/setnamagrup.js',
   'group/setppgrup.js',
   'group/swgc.js',
+  'group/unprefix.js',
 ])
 
 async function load(t) {
