@@ -31,7 +31,12 @@ test('bridge: validateJob menerima job file dan menolak yang tidak lengkap', () 
   assert.throws(() => validateJob({ type: 'teleport', text: 'x' }), /say.*cmd.*file/)
 })
 
-test('bridge: resolveBridgeFile mengurung file di workspace dan memblokir rahasia', () => {
+test('bridge: resolveBridgeFile mengurung file di workspace dan memblokir rahasia', t => {
+  // Bridge adalah fitur POSIX (jail path + Ryn menulis JSON ke disk bot):
+  // di Windows jalurnya ber-drive (C:\) sehingga ekspektasi POSIX di
+  // bawah tidak berlaku — skip otomatis di Windows, bukan karena
+  // logikanya rusak (keputusan Veo 2026-11-26: "bikin keskip dulu").
+  if (process.platform === 'win32') return t.skip('bridge hanya POSIX')
   const root = '/home/test/workspace/sailox-bot'
   assert.equal(resolveBridgeFile(root, 'sailox-bot/src/doc.pdf'), '/home/test/workspace/sailox-bot/src/doc.pdf')
   assert.equal(resolveBridgeFile(root, '/home/test/workspace/catatan.txt'), '/home/test/workspace/catatan.txt')

@@ -58,6 +58,35 @@ test('antrean: state hidup di file JSON, job selesai berurutan per pengguna', as
   assert.ok(order.indexOf('start:3') < order.indexOf('end:2'), 'pengguna lain boleh menyalip job yang masih menunggu giliran per-penggunanya')
 })
 
+// Mtime stabil => tidak ada save latar yang masih berjalan; dipakai tes di
+// bawah supaya 'sebelum' tidak diambil saat save terakhir belum mendarat.
+async function stableMtime(file, tries = 30) {
+  let prev = (await fs.stat(file)).mtimeMs
+  for (let i = 0; i < tries; i++) {
+    await new Promise(r => setTimeout(r, 100))
+    const cur = (await fs.stat(file)).mtimeMs
+    if (cur === prev) return cur
+    prev = cur
+  }
+  return prev
+}
+
+test('antrean: pump yang tidak menemukan job tidak menulis ulang file antrean', async t => {
+  // Regresi balapan cleanup Windows: dulu setiap pass pompa menyimpan
+  // file walau tidak ada yang berubah — save itu bisa mendarat setelah
+  // direktori temp tes dihapus (ENOENT) atau setelah rm dimulai
+  // (ENOTEMPTY). Tanpa perbaikan, kick() di bawah mengubah mtime.
+  const dir = await tmpDir(t)
+  const file = path.join(dir, 'q.json')
+  const queue = createDownloadQueue({ file, processJob: async () => ({}) })
+  await queue.enqueue({ url: 'https://x/1', provider: 'pixeldrain', chat: 'c', sender: 'A' })
+  await waitFor(async () => (await queue.snapshot()).pending === 0 && (await queue.snapshot()).active === 0)
+  const before = await stableMtime(file)
+  queue.kick()
+  await new Promise(r => setTimeout(r, 200))
+  assert.equal((await fs.stat(file)).mtimeMs, before, 'kick tanpa job tidak boleh menyentuh file')
+})
+
 test('antrean: batas per pengguna & total ditegakkan', async t => {
   const dir = await tmpDir(t)
   const queue = createDownloadQueue({ file: path.join(dir, 'q.json'), processJob: async () => ({}), maxConcurrent: 0, maxPendingPerUser: 2, maxPendingTotal: 3 })

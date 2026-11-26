@@ -164,7 +164,8 @@ async function makeVideoSticker(buffer, packname, author, { root }) {
     await fs.writeFile(input, buffer)
     let webp = null
     for (const [fps, qv] of [[10, 50], [8, 36], [6, 24], [5, 16], [4, 12], [3, 8]]) {
-      await execFileP('ffmpeg', ['-y', '-i', input, '-t', String(MAX_DURATION), '-vf', `fps=${fps},scale=${STICKER_SIZE}:${STICKER_SIZE}:force_original_aspect_ratio=decrease,format=rgba,pad=${STICKER_SIZE}:${STICKER_SIZE}:(ow-iw)/2:(oh-ih)/2:color=0x00000000,setsar=1`, '-vcodec', 'libwebp', '-lossless', '0', '-compression_level', '6', '-q:v', String(qv), '-loop', '0', '-preset', 'picture', '-an', '-vsync', '0', output], { timeout: 90000, maxBuffer: 4 * 1024 * 1024 })
+      // '-fps_mode passthrough' = '-vsync 0' versi baru (dihapus ffmpeg 9).
+      await execFileP('ffmpeg', ['-y', '-i', input, '-t', String(MAX_DURATION), '-vf', `fps=${fps},scale=${STICKER_SIZE}:${STICKER_SIZE}:force_original_aspect_ratio=decrease,format=rgba,pad=${STICKER_SIZE}:${STICKER_SIZE}:(ow-iw)/2:(oh-ih)/2:color=0x00000000,setsar=1`, '-vcodec', 'libwebp', '-lossless', '0', '-compression_level', '6', '-q:v', String(qv), '-loop', '0', '-preset', 'picture', '-an', '-fps_mode', 'passthrough', output], { timeout: 90000, maxBuffer: 4 * 1024 * 1024 })
       webp = await fs.readFile(output)
       if (webp.length <= 880 * 1024) break
     }

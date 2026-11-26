@@ -67,6 +67,16 @@ test('antrean: update() menambal field job yang masih hidup', async t => {
   await queue.update(job.id, { batch: { name: 'F', items: [], progress: { done: [0], failed: [], kept: [] } } })
   const snap = await queue.snapshot()
   assert.deepEqual(snap.jobs.find(j => j.id === job.id).batch.progress.done, [0])
+  // Tunggu job selesai sampai hilang dari file: save finish() masih antre
+  // di writeChain saat update() kembali — bila tes berakhir sebelum save
+  // itu mendarat, cleanup penghapus direktori balapan dengan save
+  // tersebut (ENOTEMPTY). Setelah file menunjukkan 0 job, tidak ada lagi
+  // tulis yang akan datang (klaim kosong tidak menulis file).
+  for (let i = 0; i < 200; i++) {
+    if ((await queue.snapshot()).jobs.length === 0) break
+    await new Promise(r => setTimeout(r, 10))
+  }
+  assert.equal((await queue.snapshot()).jobs.length, 0, 'job selesai dan dibersihkan dari file sebelum tes berakhir')
 })
 
 // ─── runJob: list GoFile membuka sesi, Pixeldrain tetap pola lama ──────────
