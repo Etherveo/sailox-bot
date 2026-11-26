@@ -117,6 +117,25 @@ test('bcc: tanpa teks dan tanpa media ditolak dengan usage', async t => {
   await assert.rejects(bccHandler(fakeMsg(), { conn, text: '', bccSessions: createBccSessionStore() }), /Kirim pesannya/)
 })
 
+test('bcc: reply pesan teks disiarkan (caption kosong tidak menutupi text)', async t => {
+  withChannel(t, CHANNEL)
+  const conn = fakeConn()
+  // Pesan asli (lib/simple.js) selalu punya getter caption yang
+  // mengembalikan '' — tanpa caption: '' di fake ini, bug `caption ?? text`
+  // tidak tertangkap (fake lama tak punya properti caption sama sekali).
+  const m = fakeMsg({ quoted: { mtype: 'conversation', caption: '', text: 'teks reply' } })
+  await bccHandler(m, { conn, text: '', bccSessions: createBccSessionStore() })
+  const sends = mediaSends(conn)
+  assert.equal(sends.length, 1)
+  assert.equal(sends[0].jid, CHANNEL)
+  assert.equal(sends[0].content.text, 'teks reply')
+  assert.ok(m.replies.some(r => r.includes('Broadcast terkirim')))
+})
+
+test('bcc: handler membawa maxArgs untuk teks siaran panjang', () => {
+  assert.equal(bccHandler.maxArgs, 2000)
+})
+
 test('bcc: gambar sendiri tanpa teks disiarkan tanpa caption', async t => {
   withChannel(t, CHANNEL)
   const conn = fakeConn()

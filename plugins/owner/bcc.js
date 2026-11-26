@@ -153,7 +153,12 @@ let handler = async (m, ctx) => {
   const ownImage = m.mtype === 'imageMessage' ? m : null
   const q = m.quoted
   const quotedImage = q?.mtype === 'imageMessage' ? q : null
-  const replyText = String(q?.caption ?? q?.text ?? '').trim()
+  // Urutan text-dulu: getter caption di lib/simple.js SELALU mengembalikan
+  // string ('' bila tak ada caption), jadi `caption ?? text` tidak pernah
+  // sampai ke text — reply pesan teks selalu terbaca kosong (USAGE).
+  // Getter .text sudah mengembalikan caption untuk pesan media, jadi satu
+  // ini cukup untuk keduanya (sama seperti channelinfo.js).
+  const replyText = String(q?.text ?? q?.caption ?? '').trim()
   const decision = decideBcc({ directText, replyText })
   const mediaMsg = ownImage ?? quotedImage
   if (decision.kind === 'empty' && !mediaMsg) throw USAGE
@@ -187,6 +192,9 @@ let handler = async (m, ctx) => {
 handler.help = ['bcc <pesan>', 'bcc (kirim/reply gambar)']
 handler.tags = ['owner']
 handler.command = ['bcc', 'broadcastchannel']
+// Teks siaran boleh panjang — pengumuman 144 kata pernah ditolak diam-diam
+// oleh batas 128 kata parseCommand (lihat lib/helpers/parsing.js).
+handler.maxArgs = 2000
 handler.founder = true
 
 // Hook pilih angka untuk sesi .bcc. Hanya token persis yang ditelan
