@@ -19,7 +19,7 @@ import { Database } from '../lib/database/engine.js'
 import { fakeConn, raw, PN, LID, BOTLID, GROUP } from './fixtures.js'
 import { dayKey } from '../lib/helpers/time.js'
 import { serialize } from '../lib/simple.js'
-import { unprefixFallbackInput } from '../lib/helpers/parsing.js'
+import { unprefixFallbackForPlugin, findUnprefixEntry } from '../lib/helpers/parsing.js'
 import unprefix, { UNPREFIX_MAX, findUnprefixCommand, unprefixList } from '../plugins/group/unprefix.js'
 import ping from '../plugins/info/ping.js'
 import menu from '../plugins/main/menu.js'
@@ -84,43 +84,51 @@ const memberMsg = (s, text) => raw(text, { group: true, participant: MEMBER.id, 
 const founderMsg = (s, text) => raw(text, { group: true, fromMe: true, id: s.nextId() })
 const founderDM = (s, text) => raw(text, { group: false, fromMe: true, id: s.nextId() })
 
-// ─── Logika murni: unprefixFallbackInput ──────────────────────────────────
+// ─── Logika murni: unprefixFallbackForPlugin + findUnprefixEntry ────────
 
-test('unprefixFallbackInput: kata utuh cocok (case-insensitive), kata menempel tidak', () => {
-  const words = ['sa', 'menu']
-  assert.equal(unprefixFallbackInput('sa', words, '.'), '.sa')
-  assert.equal(unprefixFallbackInput('Sa', words, '.'), '.sa')
-  assert.equal(unprefixFallbackInput('SA', words, '.'), '.sa')
-  assert.equal(unprefixFallbackInput('sa,', words, '.'), '.sa')
-  assert.equal(unprefixFallbackInput('sa, foto', words, '.'), '.sa foto')
-  assert.equal(unprefixFallbackInput('menu hari ini apa', words, '.'), '.menu hari ini apa')
-  assert.equal(unprefixFallbackInput('Menu', words, '.'), '.menu')
-  assert.equal(unprefixFallbackInput('MENU', words, '.'), '.menu')
-  assert.equal(unprefixFallbackInput('menu, tolong', words, '.'), '.menu tolong')
-  assert.equal(unprefixFallbackInput('  sa', words, '.'), '.sa', 'spasi awal di-trim')
-  assert.equal(unprefixFallbackInput('saya', words, '.'), null)
-  assert.equal(unprefixFallbackInput('satu', words, '.'), null)
-  assert.equal(unprefixFallbackInput('menuku dong', words, '.'), null)
-  assert.equal(unprefixFallbackInput('saya mau menu', words, '.'), null, 'kata harus di awal pesan')
-  assert.equal(unprefixFallbackInput('.sa', words, '.'), null, 'pesan ber-prefix tidak lewat fallback')
-  assert.equal(unprefixFallbackInput('halo apa kabar', words, '.'), null)
-  assert.equal(unprefixFallbackInput('sa', [], '.'), null)
-  assert.equal(unprefixFallbackInput('sa', undefined, '.'), null)
-  assert.equal(unprefixFallbackInput('', words, '.'), null)
+test('unprefixFallbackForPlugin: kata utuh cocok (case-insensitive), kata menempel tidak; alias ikut', () => {
+  assert.equal(unprefixFallbackForPlugin('ping', ping, '.'), '.ping')
+  assert.equal(unprefixFallbackForPlugin('PING', ping, '.'), '.ping')
+  assert.equal(unprefixFallbackForPlugin('ping,', ping, '.'), '.ping')
+  assert.equal(unprefixFallbackForPlugin('ping! halo', ping, '.'), '.ping halo')
+  assert.equal(unprefixFallbackForPlugin('p', ping, '.'), '.p', 'alias ikut tanpa prefix')
+  assert.equal(unprefixFallbackForPlugin('P', ping, '.'), '.p')
+  assert.equal(unprefixFallbackForPlugin('pingpong', ping, '.'), null)
+  assert.equal(unprefixFallbackForPlugin('sa', stickeraudio, '.'), '.sa')
+  assert.equal(unprefixFallbackForPlugin('Sa', stickeraudio, '.'), '.sa')
+  assert.equal(unprefixFallbackForPlugin('SA', stickeraudio, '.'), '.sa')
+  assert.equal(unprefixFallbackForPlugin('sa,', stickeraudio, '.'), '.sa')
+  assert.equal(unprefixFallbackForPlugin('sa, foto', stickeraudio, '.'), '.sa foto')
+  assert.equal(unprefixFallbackForPlugin('saya', stickeraudio, '.'), null)
+  assert.equal(unprefixFallbackForPlugin('satu', stickeraudio, '.'), null)
+  assert.equal(unprefixFallbackForPlugin('menu hari ini apa', menu, '.'), '.menu hari ini apa')
+  assert.equal(unprefixFallbackForPlugin('Menu', menu, '.'), '.menu')
+  assert.equal(unprefixFallbackForPlugin('MENU', menu, '.'), '.menu')
+  assert.equal(unprefixFallbackForPlugin('menu, tolong', menu, '.'), '.menu tolong')
+  assert.equal(unprefixFallbackForPlugin('menuku dong', menu, '.'), null)
+  assert.equal(unprefixFallbackForPlugin('  sa', stickeraudio, '.'), '.sa', 'spasi awal di-trim')
+  assert.equal(unprefixFallbackForPlugin('.sa', stickeraudio, '.'), null, 'pesan ber-prefix tidak lewat fallback')
+  assert.equal(unprefixFallbackForPlugin('halo apa kabar', ping, '.'), null)
+  assert.equal(unprefixFallbackForPlugin('', ping, '.'), null)
+  assert.equal(unprefixFallbackForPlugin('sa', { before: () => {} }, '.'), null, 'plugin tanpa command → null')
 })
 
-test('findUnprefixCommand: cocok dengan command nyata, tolak regex kosong dan hook-only', () => {
+test('findUnprefixEntry: kembalikan entry plugin, tolak regex kosong dan hook-only', () => {
   const entries = [
     { id: 'info/ping.js', plugin: ping },
     { id: 'info/prefix.js', plugin: prefix },
     { id: 'group/_antilink.js', plugin: { before: () => {} } },
   ]
+  assert.equal(findUnprefixEntry('p', entries)?.id, 'info/ping.js')
+  assert.equal(findUnprefixEntry('ping', entries)?.plugin, ping)
+  assert.equal(findUnprefixEntry('P', entries)?.id, 'info/ping.js', 'case-insensitive')
+  assert.equal(findUnprefixEntry('cekprefix', entries), null, 'command regex kosong /(?:)/ dilewati — bukan perintah bernama')
+  assert.equal(findUnprefixEntry('zzz', entries), null)
+  assert.equal(findUnprefixEntry('', entries), null)
+  // Wrapper tipis di plugin tetap jalan (kompat tes lama):
   assert.equal(findUnprefixCommand('p', entries), ping)
   assert.equal(findUnprefixCommand('ping', entries), ping)
-  assert.equal(findUnprefixCommand('P', entries), ping, 'case-insensitive')
-  assert.equal(findUnprefixCommand('cekprefix', entries), null, 'command regex kosong /(?:)/ dilewati — bukan perintah bernama')
-  assert.equal(findUnprefixCommand('zzz', entries), null)
-  assert.equal(findUnprefixCommand('', entries), null)
+  assert.equal(findUnprefixCommand('cekprefix', entries), null)
 })
 
 // ─── Migrasi chats v1 -> v2 ────────────────────────────────────────────────
@@ -140,11 +148,11 @@ test('chats v2: record lama tanpa field unprefix mendapat [] saat load (fillMiss
 
 // ─── Metadata plugin ──────────────────────────────────────────────────────
 
-test('metadata: satu plugin, tag group, admin + premium + group, tanpa limit; help 3 baris', () => {
+test('metadata: satu plugin, tag group, premium + group, tanpa limit; admin dicek di handler (owner bebas); help 3 baris', () => {
   assert.equal(unprefix.command.test('unprefix'), true)
   assert.equal(unprefix.command.test('Unprefix'), true)
   assert.equal(unprefix.command.test('unprefixx'), false)
-  assert.equal(unprefix.admin, true)
+  assert.equal(unprefix.admin, undefined, 'gerbang admin di dalam handler — owner tidak perlu admin grup (Veo 2026-11-26)')
   assert.equal(unprefix.premium, true)
   assert.equal(unprefix.group, true)
   assert.equal(unprefix.limit, undefined, 'fitur grup bebas limit — keputusan Veo 2026-11-25')
@@ -160,6 +168,7 @@ test('tambah: founder .unprefix sa → tersimpan + konfirmasi', async t => {
   await s.run([founderMsg(s, '.unprefix sa')])
   assert.deepEqual(s.list(), ['sa'])
   assert.ok(s.replies().some(x => x.includes('sa') && x.includes('tanpa prefix')), s.replies())
+  assert.ok(s.replies().some(x => x.includes('alias')), s.replies(), 'konfirmasi menyebut alias ikut tanpa prefix')
 })
 
 test('tambah: huruf besar dinormalisasi ke kecil', async t => {
@@ -207,6 +216,7 @@ test('list: kosong vs berisi', async t => {
   await s.run([founderMsg(s, '.unprefix list')])
   const shown = s.replies().at(-1)
   assert.ok(shown.includes('sa') && shown.includes('menu'), shown)
+  assert.ok(shown.includes('alias'), shown, 'list menjelaskan satu label = seluruh plugin termasuk alias')
 })
 
 test('del: hapus berhasil + hapus yang tidak ada', async t => {
@@ -252,6 +262,20 @@ test('gerbang: member bukan admin ditolak', async t => {
   assert.deepEqual(s.list(), [])
 })
 
+test('gerbang: owner bukan admin grup tetap bisa (perintah Veo 2026-11-26) — REGRESI: gagal bila gerbang admin masih handler.admin', async t => {
+  // founderMsg = fromMe → isOwner; pengirimnya akun bot sendiri (BOTLID),
+  // jadi BOTLID-lah yang dibuat bukan admin di metadata grup ini.
+  const parts = [
+    { id: LID, phoneNumber: PN, admin: null },
+    { id: BOTLID, phoneNumber: '6282234567890@s.whatsapp.net', admin: null },
+    MEMBER,
+  ]
+  const s = await setup(t, parts)
+  await s.run([founderMsg(s, '.unprefix sa')])
+  assert.deepEqual(s.list(), ['sa'])
+  assert.ok(s.replies().some(x => x.includes('tanpa prefix')), s.replies())
+})
+
 test('gerbang: admin bukan premium ditolak', async t => {
   const s = await setup(t)
   await s.run([adminMsg(s, '.unprefix sa')])
@@ -265,6 +289,50 @@ test('fallback: bare p memicu .ping (Pong!) — REGRESI: gagal tanpa fallback pi
   const s = await setup(t)
   await s.run([founderMsg(s, '.unprefix p')])
   assert.deepEqual(s.list(), ['p'])
+  const before = s.replies().length
+  await s.run([adminMsg(s, 'p')])
+  assert.ok(s.replies().slice(before).some(x => x.startsWith('Pong!')), s.replies())
+})
+
+// ─── Alias: satu label = seluruh plugin ───────────────────────────────────
+
+test('alias: tambah ping lalu bare p memicu Pong — REGRESI INTI: gagal dengan logika kata-lama', async t => {
+  const s = await setup(t)
+  await s.run([founderMsg(s, '.unprefix ping')])
+  assert.deepEqual(s.list(), ['ping'])
+  const before = s.replies().length
+  await s.run([adminMsg(s, 'p')])
+  assert.ok(s.replies().slice(before).some(x => x.startsWith('Pong!')), s.replies())
+})
+
+test('alias: tambah via p lalu bare ping memicu', async t => {
+  const s = await setup(t)
+  await s.run([founderMsg(s, '.unprefix p')])
+  assert.deepEqual(s.list(), ['p'])
+  const before = s.replies().length
+  await s.run([adminMsg(s, 'ping')])
+  assert.ok(s.replies().slice(before).some(x => x.startsWith('Pong!')), s.replies())
+})
+
+test('alias: tambah ping lalu tambah p → info duplikat menyebut label lama', async t => {
+  const s = await setup(t)
+  await s.run([founderMsg(s, '.unprefix ping')])
+  await s.run([founderMsg(s, '.unprefix p')])
+  assert.deepEqual(s.list(), ['ping'])
+  assert.ok(s.replies().some(x => x.includes('sudah ada') && x.includes('ping')), s.replies())
+})
+
+test('alias: tambah ping, hapus via p → daftar kosong', async t => {
+  const s = await setup(t)
+  await s.run([founderMsg(s, '.unprefix ping')])
+  await s.run([founderMsg(s, '.unprefix del p')])
+  assert.deepEqual(s.list(), [])
+  assert.ok(s.replies().some(x => x.includes('dihapus')), s.replies())
+})
+
+test('alias: entri lama ping (seed record) membuat bare p jalan tanpa perintah tambah', async t => {
+  const s = await setup(t)
+  s.db.ensure('chats', GROUP).unprefix = ['ping']
   const before = s.replies().length
   await s.run([adminMsg(s, 'p')])
   assert.ok(s.replies().slice(before).some(x => x.startsWith('Pong!')), s.replies())

@@ -32,7 +32,7 @@ Alternatif noninteraktif: `npm start -- --login pairing --phone <digit-nomor>` a
 | `.banuser target`, `.unbanuser target` | Owner; target harus terpetakan ke LID |
 | `.banchat [nomor/jid/lid]`, `.unbanchat [nomor/jid/lid]` | Owner; tanpa argumen = chat saat ini, reply = DM orang itu |
 | `d` / `del` / `delete` tanpa prefix (sebagai reply) | Owner; odelete — hapus pesan siapa pun, termasuk pesan bot di grup; bot harus admin untuk pesan orang lain |
-| `.unprefix <perintah>`, `.unprefix list`, `.unprefix del <perintah>` | Admin grup + premium; perintah bisa dipakai tanpa prefix di grup ini (kata harus berdiri sendiri); maks 20 per grup |
+| `.unprefix <perintah>`, `.unprefix list`, `.unprefix del <perintah>` | Owner (tanpa harus admin grup) / admin grup + premium; satu kata = seluruh perintah plugin itu termasuk aliasnya (mis. `ping` membebaskan `p` dan `ping`); kata harus berdiri sendiri; maks 20 per grup |
 | `.addpremium <target> <durasi>`, `.delpremium <target>` | Owner; alias `.addprem`/`.delprem`; durasi 1d/1w/1m (30 hari), bisa digabung (1w 5d); target reply/tag/nomor |
 | `.self`, `.public` | Owner; mode tersimpan per bot |
 | `.setprefix !`, `.setprefix reset` | Owner; ubah/reset prefix |

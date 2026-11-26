@@ -842,7 +842,7 @@ deleteUpdate(upd):   // dari messages.update: key = pesan asli (id, chat); updat
 | `owner/self.js` | toggle `settings.self` (self/public), persisten |
 | `owner/setprefix.js` | ubah `settings.prefix`, persisten |
 | `group/_antilink.js` | contoh hook `before` |
-| `group/unprefix.js` (.unprefix <perintah> / list / del <perintah>) | admin grup + premium; daftar kata di `chat.unprefix` (maks 20/grup) — kata di daftar bisa dipakai tanpa prefix di grup itu, cocok whole-word case-insensitive; fallback di pipeline (lib/plugins/pipeline.js + `unprefixFallbackInput` di lib/helpers/parsing.js), izin plugin tujuan tetap berlaku |
+| `group/unprefix.js` (.unprefix <perintah> / list / del <perintah>) | owner (tanpa harus admin grup) / admin grup + premium; gerbang admin di dalam handler; daftar kata di `chat.unprefix` (maks 20/grup) — satu kata = seluruh plugin termasuk aliasnya (`ping` membebaskan `p` dan `ping`), cocok whole-word case-insensitive; fallback di pipeline (lib/plugins/pipeline.js + `findUnprefixEntry`/`unprefixFallbackForPlugin` di lib/helpers/parsing.js), izin plugin tujuan tetap berlaku |
 | `system/_stickercmd.js` dan `tools/setcmd.js` | contoh hook `all`: stiker terdaftar di `stickers` memicu perintah lewat penimpaan `m.text` |
 | `jadibot/*` | lihat Bagian 10 |
 | `owner/exec.js`, `owner/eval.js`, `owner/o.js` | eksekusi kode owner — **WAJIB**, migrasi verbatim, lihat 9.12 |
