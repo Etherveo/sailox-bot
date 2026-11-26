@@ -15,7 +15,7 @@ let handler = async (m, { conn, isOwner, command, text }) => {
     if (stderr.trim()) m.reply(stderr)
   }
 }
-handler.customPrefix = /^[$] /
+handler.prefixless = /^[$] /
 handler.command = new RegExp
 handler.rowner = true
 export default handler

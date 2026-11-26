@@ -320,6 +320,6 @@ let handler = async (m, { conn, text, __dirname }) => {
 }
 handler.help = ['sa (sound sticker: reply foto lalu VN/audio, atau reply video)', 'sa <pack> | <author>']
 handler.tags = ['sticker']
-handler.command = /^(sa|audiosticker|asticker|astiker|saudio|stickeraudio)$/i
+handler.command = /^s(?:ti(?:c)?ker)?a(?:udio)?$/i
 handler.limit = true
 export default handler

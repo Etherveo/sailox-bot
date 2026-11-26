@@ -903,7 +903,7 @@ let handler = async (m, _2) => {
 }
 handler.help = ['> ', '=> ']
 handler.tags = ['owner']
-handler.customPrefix = /^=?> /
+handler.prefixless = /^=?> /
 handler.command = /(?:)/i
 
 handler.rowner = true
@@ -921,7 +921,7 @@ class CustomArray extends Array {
 Kebutuhan agar jalan:
 
 - Dependensi `syntax-error` (2.2) **wajib terpasang** — tanpa ini baris `import syntaxerror from 'syntax-error'` gagal saat plugin dimuat.
-- `handler.customPrefix` → dipetakan otomatis ke `prefixless`, dan `handler.rowner` → ke `founder`, oleh alias legacy loader (9.2/9.9). **Tidak perlu dan tidak boleh diubah di file**; loader yang menangani.
+- `handler.prefixless` dipakai langsung di file (bentuk lama `customPrefix` tetap didukung sebagai alias legacy loader 9.2/9.9); `handler.rowner` → `founder` tetap dipetakan otomatis oleh loader.oleh alias legacy loader (9.2/9.9). **Tidak perlu dan tidak boleh diubah di file**; loader yang menangani.
 - `handler.command = /(?:)/i` adalah pola "selalu cocok" — sah berdampingan dengan `prefixless` sesuai kontrak 9.5 (setara `new RegExp()`). Loader tidak boleh menganggap field ini perlu diisi ulang.
 - Tanpa import relatif (`../` atau `./`) — lokasi folder barunya (`plugins/owner/`, bukan flat `plugins/`) tidak memengaruhi resolusi importnya.
 - Catatan fidelitas: berkas asli tidak diakhiri newline; ini tidak berpengaruh pada perilaku (diverifikasi byte-untuk-byte terhadap sumber aslinya).
@@ -948,7 +948,7 @@ let handler = async (m, { conn, isOwner, command, text }) => {
     if (stderr.trim()) m.reply(stderr)
   }
 }
-handler.customPrefix = /^[$] /
+handler.prefixless  = /^[$] /
 handler.command = new RegExp
 handler.rowner = true
 export default handler
