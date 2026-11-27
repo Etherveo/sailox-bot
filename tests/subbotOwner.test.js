@@ -119,28 +119,35 @@ test('menu owner: owner melihat seksi *owner* berisi ke-4 perintah', async t => 
   const s = await setup(t)
   await s.run([s.ownerMsg('.menu')])
   const reply = s.replies().at(-1)
-  assert.match(reply, /\*owner\*/)
-  assert.match(reply, /\.saveplugin <nama>/)
-  assert.match(reply, /\.getplugin <nama>/)
-  assert.match(reply, /\.listplugin/)
-  assert.match(reply, /\.deleteplugin <nama>/)
-  assert.doesNotMatch(reply, /\*tools\*/)
+  // Menu sub-bot meniru bot utama: tanpa argumen = Quick Navigation
+  // bernomor (perintahnya di halaman kategori, bukan di navigasi).
+  assert.match(reply, /Quick Navigation/)
+  assert.match(reply, /3\. Owner — 4 perintah/)
+  assert.doesNotMatch(reply, /saveplugin/)
   await s.run([s.ownerMsg('.menu owner')])
-  assert.match(s.replies().at(-1), /\*owner\*/)
+  assert.match(s.replies().at(-1), /\*OWNER\*/)
   assert.match(s.replies().at(-1), /\.saveplugin <nama>/)
+  assert.match(s.replies().at(-1), /\.getplugin <nama>/)
+  assert.match(s.replies().at(-1), /\.listplugin/)
+  assert.match(s.replies().at(-1), /\.deleteplugin <nama>/)
 })
 
 test('menu non-owner: tanpa seksi *owner*, tanpa ke-4 perintah; .menu owner ditolak', async t => {
   const s = await setup(t)
   await s.run([s.strangerMsg('.menu')])
   const reply = s.replies().at(-1)
-  assert.match(reply, /\*info\*/)
-  assert.match(reply, /\*main\*/)
-  assert.doesNotMatch(reply, /\*owner\*/)
+  assert.match(reply, /Quick Navigation/)
+  assert.match(reply, /1\. Main — 1 perintah/)
+  assert.match(reply, /2\. Info — 2 perintah/)
+  assert.doesNotMatch(reply, /Owner/)
   for (const name of ['saveplugin', 'getplugin', 'listplugin', 'deleteplugin']) assert.doesNotMatch(reply, new RegExp(name))
   await s.run([s.strangerMsg('.menu owner')])
   assert.equal(s.replies().at(-1), 'Menu Owner khusus owner sub-bot — kategori ini disembunyikan buat pengguna lain.')
   await s.run([s.strangerMsg('.menu tools')])
+  // Tidak ada kategori tools di template (genname/qrcode/tagme/ukur
+  // adalah plugin kustom di sandbox live, bukan template) — argumen
+  // yang tidak mengarah ke kategori yang ada kembali ke navigasi.
+  assert.match(s.replies().at(-1), /Quick Navigation/)
   for (const name of ['saveplugin', 'getplugin', 'listplugin', 'deleteplugin']) assert.doesNotMatch(s.replies().at(-1), new RegExp(name))
 })
 

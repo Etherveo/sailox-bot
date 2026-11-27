@@ -10,4 +10,8 @@ handler.help = ['register Nama.umur'];
 handler.tags = ['main'];
 handler.command = /^(register|daftar)$/i;
 handler.register = false;
+// Dibagikan ke sub-bot: gerbang registrasi berlaku di sana, tapi perintahnya
+// belum ada (temuan Veo 2026-11-27) — user sub-bot tidak bisa daftar sama
+// sekali. Registrasi sub-bot tercatat di DB sandbox-nya sendiri.
+handler.sharing = true;
 export default handler
