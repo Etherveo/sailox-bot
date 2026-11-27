@@ -23,14 +23,16 @@ import { EventEmitter } from 'node:events'
 import { setImmediate as tick } from 'node:timers/promises'
 import { validIPC } from '../lib/subbot/ipc.js'
 import { sniffMedia, parseImageDimensions, validateConvertInput, verifyStickerOutput, verifyAudioOutput } from '../lib/subbot/mediaInspect.js'
-import { initConvertClient, handleConvertResult, requestConvert, stampStickerMeta } from '../lib/subbot/convertClient.js'
-import { admitConvert, releaseConvert, checkProbe, probeMedia, handleStickerConvert, CONVERT_MAX_CONCURRENT, CONVERT_MAX_PER_HOUR } from '../lib/subbot/convertService.js'
+import { initConvertClient, initBratClient, handleConvertResult, requestConvert, requestBrat, stampStickerMeta } from '../lib/subbot/convertClient.js'
+import { admitConvert, releaseConvert, checkProbe, probeMedia, handleStickerConvert, handleBratRender, CONVERT_MAX_CONCURRENT, CONVERT_MAX_PER_HOUR } from '../lib/subbot/convertService.js'
 import { parseStickerArgs, extractStickerMeta, ffmpegAvailable } from '../lib/media/sticker.js'
+import { validateBratText } from '../lib/media/brat.js'
 import { SubBotManager } from '../lib/subbot/manager.js'
 import { Database } from '../lib/database/engine.js'
 import { fakeConn, PN, LID, BOTLID } from './fixtures.js'
 import stickerHandler from '../plugins/sticker/sticker.js'
 import saHandler from '../plugins/sticker/stickeraudio.js'
+import bratHandler from '../plugins/sticker/brat.js'
 
 const execFileP = promisify(execFile)
 // Fixture tetap (disalin dari tests/sticker.test.js): WebP 512x512 hasil
@@ -515,4 +517,135 @@ test('plugin .sa sub-bot: video -> stiker animasi + audio; pack ditempel bila di
   assert.equal(meta['sticker-pack-publisher'], 'AuthQ')
   assert.deepEqual(meta.emojis, ['🔊'], 'emoji sound sticker dipertahankan saat re-stamp')
   assert.ok(conn.calls.some(c => c.content?.audio), 'audio video terkirim (fallback)')
+})
+
+// ─── Brat via channel (10.14) ────────────────────────────────────────────
+// Inputnya TEKS (bukan file): 'brat-render' membawa { requestId, text },
+// hasilnya kembali lewat 'sticker-result' yang sama seperti konversi
+// stiker. Kuota ikut anggaran yang sama (admitConvert).
+
+test('brat lapis-1: validateBratText menolak teks buruk, menerima yang sah', () => {
+  assert.equal(validateBratText('  kapan nikah?  '), 'kapan nikah?')
+  assert.equal(validateBratText('halo'), 'halo')
+  assert.equal(validateBratText('x'.repeat(150)).length, 150)
+  assert.throws(() => validateBratText(''), /Contoh: \.brat/)
+  assert.throws(() => validateBratText('   '), /Contoh: \.brat/)
+  assert.throws(() => validateBratText(null), /Contoh: \.brat/)
+  assert.throws(() => validateBratText('x'.repeat(151)), /Maksimal 150/)
+  assert.throws(() => validateBratText('teks\x01nakal'), /karakter kontrol/)
+  assert.throws(() => validateBratText('teks\x7Fnakal'), /karakter kontrol/)
+  assert.equal(validateBratText('baris\nbaru'), 'baris\nbaru', 'newline hanya pemisah kata — sama seperti jalur utama')
+})
+
+test('ipc: brat-render tervalidasi; bentuk rusak ditolak', () => {
+  const goodBrat = { requestId: 'a1b2c3d4e5f60718', text: 'kapan nikah?' }
+  assert.equal(validIPC({ v: 1, type: 'brat-render', ...goodBrat }, 'from-worker'), true)
+  assert.equal(validIPC({ v: 1, type: 'brat-render', ...goodBrat, text: '' }, 'from-worker'), false)
+  assert.equal(validIPC({ v: 1, type: 'brat-render', ...goodBrat, text: '   ' }, 'from-worker'), false)
+  assert.equal(validIPC({ v: 1, type: 'brat-render', ...goodBrat, text: 'x'.repeat(151) }, 'from-worker'), false)
+  assert.equal(validIPC({ v: 1, type: 'brat-render', ...goodBrat, text: 'a\x01b' }, 'from-worker'), false)
+  assert.equal(validIPC({ v: 1, type: 'brat-render', ...goodBrat, text: 123 }, 'from-worker'), false)
+  assert.equal(validIPC({ v: 1, type: 'brat-render', ...goodBrat, requestId: 'pendek' }, 'from-worker'), false)
+  assert.equal(validIPC({ v: 1, type: 'brat-render', ...goodBrat }, 'to-worker'), false, 'request tidak boleh dari arah manager')
+  assert.equal(validIPC({ v: 1, type: 'brat-render', ...goodBrat, text: 'baris\nbaru' }, 'from-worker'), true, 'newline lolos — pemisah kata')
+})
+
+test('brat lapis-2: manager menolak teks buruk walau validIPC dilewati (panggilan langsung)', async t => {
+  const s = await setupManager(t)
+  const sent2 = []
+  const fakeChild = { connected: true, send(m, cb) { sent2.push(m); cb?.() } }
+  const w = { child: fakeChild }
+  const requestId = crypto.randomBytes(8).toString('hex')
+  await handleBratRender(s.manager, s.id, w, { requestId, text: '' })
+  assert.equal(sent2.length, 1, 'tepat satu balasan')
+  assert.equal(sent2[0].ok, false)
+  assert.match(sent2[0].error, /Contoh: \.brat/)
+  await handleBratRender(s.manager, s.id, w, { requestId, text: 'x'.repeat(151) })
+  assert.equal(sent2[1].ok, false)
+  assert.match(sent2[1].error, /Maksimal 150/)
+  await handleBratRender(s.manager, s.id, w, { requestId, text: 'a\x01b' })
+  assert.equal(sent2[2].ok, false)
+  assert.match(sent2[2].error, /karakter kontrol/)
+})
+
+test('e2e manager: brat-render -> stiker webp valid (ffmpeg asli)', async t => {
+  if (!await ffmpegAvailable()) return t.skip('ffmpeg tidak tersedia')
+  const s = await setupManager(t)
+  // Font harus ada di root manager (produksi: root repo) — salin dari repo.
+  await fs.mkdir(path.join(s.root, 'src', 'font'), { recursive: true })
+  await fs.copyFile(path.resolve('src', 'font', 'Roboto-Regular.ttf'), path.join(s.root, 'src', 'font', 'Roboto-Regular.ttf'))
+  const requestId = crypto.randomBytes(8).toString('hex')
+  s.spawned[0].emit('message', { v: 1, type: 'brat-render', requestId, text: 'kapan nikah?' })
+  const res = await s.waitResult(requestId)
+  assert.equal(res.ok, true, JSON.stringify(res))
+  assert.equal(res.media, 'sticker')
+  const out = await fs.readFile(path.join(s.sandbox, 'tmp', res.file))
+  assert.equal(out.toString('ascii', 0, 4), 'RIFF')
+  assert.equal(out.toString('ascii', 8, 12), 'WEBP')
+  assert.equal(sha256hex(out), res.sha256)
+  const meta = extractStickerMeta(out)
+  assert.equal(meta['sticker-pack-name'], 'Brat')
+  assert.equal(meta['sticker-pack-publisher'], global.namebot || 'Sailox')
+})
+
+test('e2e manager: kuota bersamaan berlaku juga untuk brat-render', async t => {
+  if (!await ffmpegAvailable()) return t.skip('ffmpeg tidak tersedia')
+  const s = await setupManager(t)
+  await fs.mkdir(path.join(s.root, 'src', 'font'), { recursive: true })
+  await fs.copyFile(path.resolve('src', 'font', 'Roboto-Regular.ttf'), path.join(s.root, 'src', 'font', 'Roboto-Regular.ttf'))
+  const w = s.manager.workers.get(s.id)
+  assert.equal(admitConvert(w), null)
+  assert.equal(admitConvert(w), null)
+  const requestId = crypto.randomBytes(8).toString('hex')
+  s.spawned[0].emit('message', { v: 1, type: 'brat-render', requestId, text: 'kapan nikah?' })
+  const res = await s.waitResult(requestId)
+  assert.equal(res.ok, false)
+  assert.match(res.error, /Terlalu banyak konversi bersamaan/)
+  releaseConvert(w); releaseConvert(w)
+  const requestId2 = crypto.randomBytes(8).toString('hex')
+  s.spawned[0].emit('message', { v: 1, type: 'brat-render', requestId: requestId2, text: 'kapan nikah?' })
+  const res2 = await s.waitResult(requestId2)
+  assert.equal(res2.ok, true, 'setelah lepas, render jalan lagi')
+})
+
+// Transport palsu brat: tulis webp kalengan ke tmp lalu balas ok.
+function bratTransport(tmpDir, { webp }) {
+  return async msg => {
+    const outName = `conv-out-${msg.requestId}.webp`
+    await fs.writeFile(path.join(tmpDir, outName), webp)
+    handleConvertResult({ v: 1, type: 'sticker-result', requestId: msg.requestId, ok: true, file: outName, sha256: sha256hex(webp), size: webp.length, media: 'sticker', seconds: 0 })
+  }
+}
+
+test('klien brat: requestBrat menolak teks buruk SEBELUM transport dipanggil', async t => {
+  const dir = await tmpDir(t, 'sailox-conv-brat-client-')
+  useTmpDir(t, dir)
+  let called = 0
+  initBratClient(async () => { called++ })
+  await assert.rejects(() => requestBrat(''), /Contoh: \.brat/)
+  await assert.rejects(() => requestBrat('x'.repeat(151)), /Maksimal 150/)
+  await assert.rejects(() => requestBrat('a\x01b'), /karakter kontrol/)
+  assert.equal(called, 0, 'tidak ada IPC keluar untuk teks buruk')
+})
+
+test('plugin .brat sub-bot: teks dikirim lewat channel; sharing true', async t => {
+  const dir = await tmpDir(t, 'sailox-conv-plug-brat-')
+  useTmpDir(t, dir)
+  const webp = Buffer.from(WEBP_B64, 'base64')
+  initBratClient(bratTransport(dir, { webp }))
+  const conn = subConn()
+  const m = {
+    key: { remoteJid: '6281234567890@s.whatsapp.net', id: 'msg1', fromMe: false },
+    chat: '6281234567890@s.whatsapp.net',
+    sender: '6281234567890@s.whatsapp.net',
+    conn,
+    quoted: null,
+  }
+  await bratHandler(m, { conn, text: 'kapan nikah?', __dirname: '/tmp/x' })
+  const sentSticker = conn.calls.find(c => c.content?.sticker)?.content.sticker
+  assert.ok(sentSticker, 'stiker terkirim')
+  assert.ok(sentSticker.equals(webp), 'stiker = webp kalengan dari channel (bukan render lokal)')
+  assert.equal(bratHandler.sharing, true)
+  // Teks buruk ditolak plugin sendiri sebelum channel (pesan plugin).
+  await assert.rejects(() => bratHandler(m, { conn, text: 'x'.repeat(151), __dirname: '/tmp/x' }), /Teks terlalu panjang/)
 })

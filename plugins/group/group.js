@@ -8,7 +8,7 @@
 //
 // Setting disimpan di record chats grup itu sendiri
 // (global.db.data.chats[m.chat].swgc) — pola yang sama seperti
-// banchat/unbanchat (plugins/owner/banchat.js): ensure, ubah field,
+// banchat/allowchat (plugins/owner/banchat.js): ensure, ubah field,
 // save('chats').
 //
 // Yang boleh mengubah: admin grup (handler.admin) — konsisten dengan

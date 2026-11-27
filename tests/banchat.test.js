@@ -9,6 +9,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
+import { proto } from '@whiskeysockets/baileys'
 import { createPipeline } from '../lib/plugins/pipeline.js'
 import { Database } from '../lib/database/engine.js'
 import { fakeConn, raw, PN, LID, BOTLID, GROUP } from './fixtures.js'
@@ -54,16 +55,27 @@ async function setup(t) {
 const ownerDM = (s, text) => raw(text, { fromMe: true, id: s.nextId() })
 const ownerGroup = (s, text, id) => raw(text, { group: true, fromMe: true, id: id ?? s.nextId() })
 const ownerGroupReply = (s, text, participant) => raw(text, { group: true, fromMe: true, id: s.nextId(), message: { extendedTextMessage: { text, contextInfo: { quotedMessage: { conversation: 'hai' }, stanzaId: 'q1', participant } } } })
+const ownerGroupMention = (s, text, jid) => raw(text, { group: true, fromMe: true, id: s.nextId(), message: { extendedTextMessage: { text, contextInfo: { mentionedJid: [jid] } } } })
 const targetDM = (s, text = '.ping') => raw(text, { id: s.nextId() })
 const targetGroup = (s, text = '.ping') => raw(text, { group: true, id: s.nextId() })
+// Pesan dari grup ARBITRER (bukan GROUP fixture) — untuk menguji ban
+// id grup string pendek/panjang: remoteJid grup itu sendiri.
+const rawFromGroup = (s, groupJid, text = '.ping') => {
+  const m = proto.WebMessageInfo.fromObject({ key: { id: s.nextId(), remoteJid: groupJid, fromMe: false, participant: PN }, messageTimestamp: Date.now() / 1000, pushName: 'Test', message: { conversation: text } })
+  m.key.participantAlt = LID
+  return m
+}
 
-test('metadata: satu plugin menangani .banchat dan .unbanchat, owner-only, tanpa limit', async () => {
+test('metadata: satu plugin menangani .banchat/.allowchat, owner-only, tanpa limit', async () => {
   assert.equal(banchat.command.test('banchat'), true)
-  assert.equal(banchat.command.test('unbanchat'), true)
+  assert.equal(banchat.command.test('allowchat'), true)
+  assert.equal(banchat.command.test('unbanchat'), true, '.unbanchat dipertahankan sebagai alias tersembunyi')
   assert.equal(banchat.command.test('banchats'), false)
+  assert.equal(banchat.command.test('allowchats'), false)
   assert.equal(banchat.owner, true)
   assert.equal(banchat.limit, undefined)
-  assert.deepEqual(banchat.help, ['banchat [target]', 'unbanchat [target]'])
+  assert.equal(banchat.sharing, true, 'banchat/allowchat dibagikan ke sub-bot')
+  assert.deepEqual(banchat.help, ['banchat [target]', 'allowchat [target]'])
   await assert.rejects(fs.stat(path.resolve('plugins/owner/unbanchat.js')), 'unbanchat.js sudah digabung ke banchat.js')
 })
 
@@ -124,6 +136,27 @@ test('bentuk 3 (argumen LID): .banchat <lid> memblokir bentuk PN juga', async t 
   assert.equal(s.replies().length, before, 'pesan dari pengguna yang diblokir harus diabaikan')
 })
 
+test('bentuk 3 (argumen nomor 08xxx): .banchat 08xxx memblokir user itu', async t => {
+  const s = await setup(t)
+  await s.run([ownerGroup(s, '.banchat 081234567890')])
+  assert.equal(s.db.data.chats[LID].isBanned, true)
+  assert.equal(s.db.data.chats[PN].isBanned, true)
+  assert.ok(s.replies().some(x => x.includes('6281234567890') && x.includes('diblokir')), s.replies())
+  const before = s.replies().length
+  await s.run([targetDM(s)])
+  assert.equal(s.replies().length, before, 'pesan dari pengguna yang diblokir harus diabaikan')
+})
+
+test('bentuk 3 (argumen tag): .banchat @tag memblokir DM orang itu', async t => {
+  const s = await setup(t)
+  await s.run([ownerGroupMention(s, '.banchat @10001', LID)])
+  assert.equal(s.db.data.chats[LID].isBanned, true)
+  assert.equal(s.db.data.chats[PN].isBanned, true)
+  const before = s.replies().length
+  await s.run([targetDM(s)])
+  assert.equal(s.replies().length, before, 'pesan dari pengguna yang diblokir harus diabaikan')
+})
+
 test('bentuk 3 (argumen JID grup): .banchat <jid grup> memblokir grup itu', async t => {
   const s = await setup(t)
   await s.run([ownerGroup(s, `.banchat ${GROUP}`)])
@@ -131,6 +164,58 @@ test('bentuk 3 (argumen JID grup): .banchat <jid grup> memblokir grup itu', asyn
   const before = s.replies().length
   await s.run([targetGroup(s)])
   assert.equal(s.replies().length, before)
+})
+
+test('bentuk 3 (id grup string pendek): .banchat 123271512@g.us memblokir grup itu', async t => {
+  const s = await setup(t)
+  const SHORT_GROUP = '123271512@g.us'
+  await s.run([ownerGroup(s, `.banchat ${SHORT_GROUP}`)])
+  assert.equal(s.db.data.chats[SHORT_GROUP].isBanned, true)
+  assert.ok(s.replies().some(x => x.includes('123271512') && x.includes('diblokir')), s.replies())
+  const before = s.replies().length
+  await s.run([rawFromGroup(s, SHORT_GROUP)])
+  assert.equal(s.replies().length, before, 'pesan dari grup pendek yang diblokir harus diabaikan')
+})
+
+test('bentuk 3 (id grup string panjang): .banchat 1203630...@g.us memblokir grup itu', async t => {
+  const s = await setup(t)
+  const LONG_GROUP = '120363027117842341@g.us'
+  await s.run([ownerGroup(s, `.banchat ${LONG_GROUP}`)])
+  assert.equal(s.db.data.chats[LONG_GROUP].isBanned, true)
+  const before = s.replies().length
+  await s.run([rawFromGroup(s, LONG_GROUP)])
+  assert.equal(s.replies().length, before, 'pesan dari grup panjang yang diblokir harus diabaikan')
+})
+
+test('bentuk 3 (angka polos tanpa @g.us): tetap nomor telepon, BUKAN grup', async t => {
+  const s = await setup(t)
+  await s.run([ownerGroup(s, '.banchat 123271512')])
+  assert.ok(s.replies().some(x => x.includes('tidak dikenali')), s.replies())
+  assert.equal(s.db.data.chats['123271512@g.us']?.isBanned ?? false, false, 'angka polos tidak boleh membuat ban grup')
+  assert.equal(s.db.data.chats[GROUP].isBanned, false)
+})
+
+test('bentuk 1 (DM): .allowchat polos membuka kedua bentuk JID/LID', async t => {
+  const s = await setup(t)
+  s.db.ensure('chats', LID).isBanned = true
+  s.db.ensure('chats', PN).isBanned = true
+  await s.run([ownerDM(s, '.allowchat')])
+  assert.equal(s.db.data.chats[LID].isBanned, false)
+  assert.equal(s.db.data.chats[PN].isBanned, false)
+  assert.ok(s.replies().some(x => x.includes('dibuka')), s.replies())
+  await s.run([targetDM(s)])
+  assert.ok(s.replies().includes('pong'), s.replies())
+})
+
+test('bentuk 3 (argumen nomor): .allowchat <nomor> membuka kedua bentuk', async t => {
+  const s = await setup(t)
+  s.db.ensure('chats', LID).isBanned = true
+  s.db.ensure('chats', PN).isBanned = true
+  await s.run([ownerGroup(s, `.allowchat ${PN_DIGITS}`)])
+  assert.equal(s.db.data.chats[LID].isBanned, false)
+  assert.equal(s.db.data.chats[PN].isBanned, false)
+  await s.run([targetDM(s)])
+  assert.ok(s.replies().includes('pong'), s.replies())
 })
 
 test('bentuk 2 (reply): .unbanchat reply membuka DM orang itu, grup tidak ikut berubah', async t => {

@@ -2,6 +2,7 @@ import path from 'node:path'
 import { reactTo, REACT } from '#lib/helpers/react.js'
 import { renderBratPng, BRAT_MAX_CHARS } from '#lib/media/brat.js'
 import { mediaToSticker } from '#lib/media/sticker.js'
+import { requestBrat } from '#lib/subbot/convertClient.js'
 // .brat <teks> — stiker teks gaya brat (adaptasi sticker-brat.js legacy
 // yang berbasis canvas; di sini metrik TTF + ffmpeg, lihat
 // lib/media/brat.js). Sumber teks, urut prioritas:
@@ -20,6 +21,18 @@ let handler = async (m, { conn, text, __dirname }) => {
   if (!content) throw 'Contoh: .brat kapan nikah? — atau reply pesan/caption media apa pun dengan .brat'
   if ([...content].length > BRAT_MAX_CHARS) throw `Teks terlalu panjang! Maksimal ${BRAT_MAX_CHARS} karakter`
   await reactTo(m, REACT.processing).catch(() => {})
+  // Sub-bot: worker tidak bisa spawn ffmpeg, jadi render dilempar ke
+  // bot utama lewat channel IPC (auto-approve, validasi berlapis —
+  // lib/subbot/convertClient.js — requestBrat). pack/author 'Brat'/
+  // nama bot sudah ditanam manager saat mediaToSticker, jadi tidak ada
+  // yang perlu di-stamp di sini. Cabang ini tidak menyentuh render
+  // lokal, mediaToSticker, maupun file font.
+  if (conn.role === 'sub') {
+    const { buffer: sticker } = await requestBrat(content)
+    await conn.sendMessage(m.chat, { sticker }, { quoted: m })
+    await reactTo(m, REACT.done).catch(() => {})
+    return
+  }
   const root = path.resolve(__dirname, '..', '..')
   const png = await renderBratPng(content, { root })
   const sticker = await mediaToSticker(png, { kind: 'image', root, packname: 'Brat', author: global.namebot || 'Sailox' })
@@ -30,4 +43,8 @@ let handler = async (m, { conn, text, __dirname }) => {
 }
 handler.help = ['brat <teks>', 'brat (reply teks/caption)']; handler.tags = ['sticker']; handler.command = /^brat$/i
 handler.limit = true
+// Dibagikan ke sub-bot: render jalan lewat channel bot utama
+// (lib/subbot/convertClient.js — requestBrat) — worker tetap tanpa
+// child process.
+handler.sharing = true
 export default handler

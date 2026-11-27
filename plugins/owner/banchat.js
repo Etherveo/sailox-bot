@@ -1,13 +1,14 @@
-// .banchat / .unbanchat — blokir/buka chat (grup atau DM seseorang).
-// Satu plugin untuk kedua perintah (command /^(ban|unban)chat$/i),
+// .banchat / .allowchat — blokir/buka chat (grup atau DM seseorang).
+// Satu plugin untuk kedua perintah (command /^(ban|allow|unban)chat$/i),
 // supaya alur lengkapnya terbaca utuh di satu file (AGENTS.md §12):
-// pemakaian -> target -> tulis flag -> balasan. Tidak ada helper
-// khusus fitur ini; yang dipakai dari luar hanya resolver identitas
-// universal (normalize/kind + conn.identity) — lihat
-// lib/identity/resolver.js.
+// pemakaian -> target -> tulis flag -> balasan. `.unbanchat` tetap
+// dikenali sebagai alias tersembunyi (tidak ditulis di help) demi
+// kompatibilitas. Tidak ada helper khusus fitur ini; yang dipakai dari
+// luar hanya resolver identitas universal (normalize/kind +
+// conn.identity) — lihat lib/identity/resolver.js.
 //
 // Tiga bentuk pemakaian (prioritas: argumen > reply > chat saat ini):
-//   1. `.banchat` / `.unbanchat` polos -> chat saat ini (grup itu
+//   1. `.banchat` / `.allowchat` polos -> chat saat ini (grup itu
 //      sendiri, atau DM lawan bicara).
 //   2. `.banchat` sambil reply pesan seseorang -> DM orang itu
 //      (m.quoted.sender). Dipakai untuk membuka DM seseorang dari
@@ -16,6 +17,14 @@
 //      jadi JID nomor telepon; JID/LID utuh dipakai apa adanya.
 //      Mention ('@...') juga bisa — JID aslinya diambil dari
 //      mentionedJid, bukan dari teksnya.
+//   3b. `.banchat <id grup>` -> grup itu. ID grup adalah STRING
+//      seperti `123271512@g.us` (angka pendek + `@g.us`) atau
+//      `1203630...@g.us` (angka panjang) — bentuk ini SUDAH jalan
+//      lewat cabang `kind(asJid) === 'group'` di bawah dan dikunci
+//      tes (tests/banchat.test.js). Angka polos TANPA `@g.us`
+//      sengaja tetap diperlakukan sebagai nomor telepon (bukan grup):
+//      angka polos ambigu dengan nomor telepon dan bisa salah
+//      sasaran — ketik id grup lengkap dengan `@g.us`.
 //
 // JID vs LID — kenapa flag ditulis ke SEMUA bentuk:
 // Satu orang punya dua identitas (JID nomor telepon dan LID). Pesan
@@ -114,8 +123,9 @@ let handler = async (m, ctx) => {
   await global.db.save('chats')
   await m.reply(`Chat ${target.label} ${banned ? 'diblokir' : 'dibuka'}.`)
 }
-handler.help = ['banchat [target]', 'unbanchat [target]']
+handler.help = ['banchat [target]', 'allowchat [target]']
 handler.tags = ['owner']
-handler.command = /^(ban|unban)chat$/i
+handler.command = /^(ban|allow|unban)chat$/i
 handler.owner = true
+handler.sharing = true
 export default handler
