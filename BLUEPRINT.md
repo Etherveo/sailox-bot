@@ -1167,8 +1167,10 @@ Urutan awal: manager `fork` → worker `ready` → manager `start`.
 | W→M | `heartbeat` | `{ t, rss, heapUsed }` | Setiap 10 detik |
 | W→M | `log` | `{ level, line }` | Log ringkas, termasuk `masked` dan terbatas laju |
 | W→M | `fatal` | `{ message }` | Pesan error yang sudah disanitasi |
+| W→M | `sticker-convert` | `{ requestId, purpose, job, kind, file, sha256, size, seconds }` | Minta bot utama mengonversi media (10.14); media lewat file di `<sandbox>/tmp`, bukan isi pesan (batas 64 KB) |
+| M→W | `sticker-result` | `{ requestId, ok, file?, sha256?, size?, media?, seconds?, error? }` | Hasil konversi (10.14); `ok: false` membawa `error` user-facing |
 
-Fase 2 (OPSIONAL): pasangan `request`/`response` sebagai *broker kemampuan* (mis. proses utama melakukan konversi media atas permintaan worker yang tidak boleh men-spawn proses).
+Fase 2 (broker kemampuan) **SUDAH DIIMPLEMENTASIKAN** untuk konversi stiker — lihat 10.14. Pasangan `sticker-convert`/`sticker-result` di atas adalah wujudnya; broker lain (bila ada di masa depan) memakai pola yang sama: request dari worker, validasi berlapis di bot utama, hasil lewat file + hash.
 
 ### 10.6 Runtime worker
 
@@ -1198,11 +1200,12 @@ Plugin di bot utama: `jadibot/jadibot.js` (`jadibot`, private), `jadibot/stopjad
 
 ### 10.9 Plugin sub-bot
 
-- **Template awal** (disalin manager dari `lib/subbot/templates/plugins/` ke `<sandbox>/plugins/`): `main/menu.js`, `info/ping.js`, `info/getlid.js`, `tools/saveplugin.js`, `tools/getplugin.js`, `tools/deleteplugin.js`. Ketiga plugin CRUD memakai `lib/plugins/files.js` (9.10) dengan `root = <sandbox>/plugins`.
+- **Template awal** (disalin manager dari `lib/subbot/templates/plugins/` ke `<sandbox>/plugins/`): `main/menu.js`, `info/ping.js`, `info/getlid.js`, `tools/saveplugin.js`, `tools/getplugin.js`, `tools/listplugin.js`, `tools/deleteplugin.js`. Keempat plugin CRUD bertag `handler.tags = ['owner']` (bukan `tools`) sehingga tampil di seksi *owner* menu sub-bot; menu menyembunyikan seksi itu dari non-owner. Keempat plugin CRUD memakai `lib/plugins/files.js` (9.10) dengan `root = <sandbox>/plugins`.
 - **Semua operasi berkas** melewati `sandboxPath(root, relatif)`: `resolve` + `realpath` harus berada di dalam `root`; tolak `..`, path absolut, nama di luar regex, dan simlink (`lstat`); tolak berkas melebihi `maxPluginKB`; jumlah plugin ≤ `maxPlugins`.
 - Hot-reload identik dengan 9.9 tetapi berjalan di proses worker. `saveplugin`/`deleteplugin` memicu reload eksplisit.
-- `saveplugin` di sub-bot hanya tersedia bila `global.bots.allowCustomPlugins` bernilai `true` (default `false`, lihat 10.12) atau `'owner-approval'` (Fase 2), dan hanya untuk `owner` sub-bot. `getplugin`/`deleteplugin` selalu hanya untuk `owner` sub-bot.
+- `saveplugin` di sub-bot hanya tersedia bila `global.bots.allowCustomPlugins` bernilai `true` (default `false`, lihat 10.12) atau `'owner-approval'` (Fase 2), dan hanya untuk `owner` sub-bot. `getplugin`/`deleteplugin`/`listplugin` selalu hanya untuk `owner` sub-bot — ditegakkan pipeline worker lewat `handler.owner` (sebelum handler jalan), bukan hanya lewat tampilan menu.
 - Sub-bot boleh mengimpor `#lib` (kode runtime read-only yang tidak menyimpan rahasia). Yang tidak terjangkau: `config.js`, `plugins/` utama, `sessions/`, `databases/` utama, `bots/` lain, dan env bot utama (10.10).
+- **Plugin sharing bot utama** (`handler.sharing = true`, disalin manager ke sandbox + hash sumbernya dipercaya policy worker): `group/unprefix.js` dan — sejak channel konversi ada (10.14) — `sticker/sticker.js` (`.s`) dan `sticker/stickeraudio.js` (`.sa`). Keduanya tetap **tanpa** child process di worker: konversi ffmpeg dilempar ke bot utama lewat IPC, jadi `--allow-child-process` tetap dilarang.
 - Template awal **tidak pernah** mencakup `owner/exec.js`, `owner/eval.js`, atau `owner/o.js` (9.12), atau plugin lain yang memakai `child_process`, konstruktor `Function`-like untuk eval, atau sejenisnya. Ini batas keras, bukan default yang bisa dikonfigurasi — lihat gerbang akses di 9.12 dan pemindai kebijakan L6 (10.10).
 
 ### 10.10 Sandbox: lapisan dan batas jaminan
@@ -1263,8 +1266,30 @@ global.bots = {
 ### 10.13 Fase pengerjaan sub-bot
 
 - **P1 (basis):** manager, launcher, registry, IPC, sandbox + `sandboxPath`, worker, pairing flow, status, stop/delete/restore, template plugin, plugin `jadibot/*` di bot utama, L1–L5.
-- **P2 (pengetatan, setelah P1 stabil):** L6 (policy scan), L7 (watchdog, kuota), mode `'owner-approval'`, broker kemampuan.
+- **P2 (pengetatan, setelah P1 stabil):** L6 (policy scan), L7 (watchdog, kuota), mode `'owner-approval'`, broker kemampuan — **broker konversi stiker sudah selesai (10.14, 2026-11-27)**.
 - **P3 (opsional):** strategi launcher `external-command` untuk isolasi tingkat OS.
+
+### 10.14 Channel konversi stiker (broker kemampuan, opsi (a) — disetujui Veo 2026-11-27)
+
+Worker jalan tanpa `--allow-child-process` (invariant `tests/subbot.test.js`), jadi `.s`/`.sa` tidak bisa menjalankan ffmpeg di worker. Konversi dilempar ke bot utama (proses manager, tanpa Permission Model) lewat IPC — **auto-approve, BUKAN antrean owner-approval plugin**. Media tidak pernah lewat isi pesan IPC (batas 64 KB): worker menulisnya ke `<sandbox>/tmp`, manager menulis hasilnya kembali ke sana.
+
+**Lapisan 1 — worker, pure-JS, sebelum apa pun dikirim** (`lib/subbot/mediaInspect.js` + `lib/subbot/convertClient.js`):
+- Validasi argumen (pack/author: batas panjang + tolak karakter kontrol — `parseStickerArgs`, `lib/media/sticker.js`) dan validasi media tanpa child process: sniff magic bytes (`file-type`), batas ukuran (gambar 10 MB, video 5 MB, audio 10 MB), dimensi dari header (PNG IHDR, GIF LSD, JPEG SOF, WebP VP8X/VP8/VP8L; maks 8000 px / 64 MP), durasi dari metadata pesan. Yang gagal ditolak dengan pesan yang jelas, tidak ada IPC keluar.
+- `requestConvert` menulis input ke `<sandbox>/tmp/conv-in-<requestId>.bin` (flag `wx`), mengirim manifest `{ requestId, purpose: 'sticker' | 'sound-sticker', job, kind, file, sha256, size, seconds }`, menunggu `sticker-result` (timeout 3 menit), lalu **memverifikasi balasan** sebelum dipakai: nama file cocok pola `conv-out-<hex>.(webp|ogg)`, `lstat` file biasa, ukuran = yang diumumkan, sha256 cocok, magic bytes WebP (`RIFF…WEBP`, ≤2 MB) atau OggS (≤1 MB). File input+output dihapus di `finally`.
+
+**Lapisan 2 — bot utama, pendekatan BERBEDA dari lapisan 1** (`lib/subbot/convertService.js`, dipanggil fire-and-forget dari cabang IPC manager supaya lock IPC tidak tertahan selama ffmpeg bekerja):
+1. **Path confinement** — nama file harus cocok `^conv-in-[0-9a-f]{16}\.bin$`, lalu `sandboxPath` + `lstat` (tolak symlink, tolak ukuran berubah).
+2. **Anti-TOCTOU** — salin ke temp dir terisolasi `os.tmpdir()/sailox-conv-*` (nama acak); semua langkah berikut memakai salinan, bukan file sandbox.
+3. **Hash** — sha256 salinan harus cocok manifest (`timingSafeEqual`); bila tidak, tolak.
+4. **Sniff ulang + validasi lapisan-1 terhadap byte salinan** — jangan percaya tipe yang dideklarasikan worker.
+5. **ffprobe deep probe** (`checkProbe` + `PROBE_RULES` per job): whitelist stream/codec/durasi — gambar png/mjpeg/webp/gif tanpa audio; video maks 1 video + 1 audio, durasi `< 10 dtk` (`.s`) / `≤ 25 dtk` (`.sa`); audio wajib ada stream audio, `≤ 300 dtk`. Tolak stream tambahan (subtitle, attachment), dimensi absurd.
+6. **Re-encode dari nol** lewat jalur yang sudah ada (`mediaToSticker` / `makeVideoSticker` / `toOggOpus` di `lib/media/sticker.js`) dengan pack/author **kosong** — byte asli input tidak ada yang lolos ke output. Timeout ketat (ffprobe 15 dtk, ffmpeg sesuai `lib/media/sticker.js`) + batas output.
+7. **Kuota per sub-bot** (state di record worker `w`, admission di dalam lock IPC — tanpa race): maks 2 konversi bersamaan, maks 30 per jam (jendela geser). Yang ditolak kuota langsung dibalas `ok: false`.
+- Hasil ditulis ke `<sandbox>/tmp/conv-out-<requestId>.webp|.ogg` (flag `wx` — gagal bila sudah ada, jangan ikuti symlink), dibalas `sticker-result` berisi path/hash/ukuran. Semua kegagalan dibalas `ok: false` dengan pesan user-facing (string validasi diteruskan apa adanya; error internal diganti pesan generik agar path/stack tidak bocor ke worker). Temp dir terisolasi selalu dibersihkan di `finally`.
+
+**packName & authorName** — ditempel **sub-bot, pure-JS, hanya bila user memberikannya** (`stampStickerMeta` di `convertClient.js`, memakai `addExifToWebp`/`extractStickerMeta` dari `lib/media/sticker.js`): bot utama sengaja meng-encode dengan pack/author kosong; worker menimpa chunk EXIF saja dan **mempertahankan `sticker-pack-id`** yang sudah ada (bila ada). Tanpa input pack/author, EXIF dari bot utama dibiarkan apa adanya.
+
+**Job yang dilayani** (`CONVERT_JOBS`): `sticker-image` (gambar → stiker), `sticker-video` (video → stiker animasi), `sa-video-sticker` (video → stiker `.sa`), `sa-audio` (audio/video → OGG Opus `.sa`). `.s` dan `.sa` keduanya lewat channel ini dan keduanya `handler.sharing = true` (baru ditandai setelah channel terverifikasi end-to-end — lihat `tests/subbotStickerConvert.test.js`, 21 tes: validasi lapis-1, validasi ulang lapis-2, e2e ffmpeg asli, kuota, stamp pack/author; tiap cek validasi dibuktikan regresi dengan mematikan ceknya).
 
 ---
 

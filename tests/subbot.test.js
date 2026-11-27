@@ -12,6 +12,7 @@ import { validIPC } from '../lib/subbot/ipc.js'
 import { inspectPolicy, codeHash } from '../lib/subbot/policy.js'
 import { queueApproval, readApproval } from '../lib/subbot/approval.js'
 import { SubBotManager } from '../lib/subbot/manager.js'
+import { jadibotCommand } from '../lib/helpers/jadibotCommands.js'
 import { Database } from '../lib/database/engine.js'
 import { fakeConn, PN, LID, BOTLID } from './fixtures.js'
 import listSubHandler from '../lib/subbot/templates/plugins/tools/listplugin.js'
@@ -51,6 +52,42 @@ test('manager owner verification, quotas/rates, handshake/status, stop/delete an
   const manager = new SubBotManager({ root, db, getConn: () => conn, config: config(), timers, spawn, notify: async (r, text) => notifications.push(text) }); t.after(async () => { await manager.stopAll(); await conn.store.close() })
   await assert.rejects(manager.create('6283234567890', { lid: LID, jid: PN }), e => typeof e === 'string')
   const id = await manager.create('6281234567890', { lid: LID, jid: PN, name: 'User' }); assert.equal(spawned.length, 1); spawned[0].emit('message', { v: 1, type: 'ready', pid: 42 }); for (let i = 0; i < 10; i++) await tick(); await manager.workers.get(id).handling.run('ipc', async () => {}); assert.ok(sent.some(m => m.type === 'start')); spawned[0].emit('message', { v: 1, type: 'status', state: 'open', me: { id: PN, lid: LID } }); await manager.workers.get(id).handling.run('ipc', async () => {}); assert.equal(manager.registry.get(id).status, 'active'); assert.equal(notifications.length, 1); assert.throws(() => manager.authorize(id, '999@lid', false)); await manager.stop(id); assert.equal(manager.registry.get(id).status, 'stopped'); await assert.rejects(manager.create('6281234567890', { lid: LID, jid: PN }), e => typeof e === 'string'); await manager.delete(id); assert.equal(manager.registry.get(id), undefined)
+})
+test('owner bot utama bisa stop/hapus sesi orang lain; mods tetap ditolak', async t => {
+  // Regresi (perintah Veo 2026-11-27): pemilik sesi adalah nomor sub-bot itu
+  // sendiri, dan pesan dari nomor bot diabaikan pipeline (m.isBaileys),
+  // jadi pemilik sesi tidak bisa .stopjadibot sendiri — owner harus bisa
+  // menembus authorize; mods tidak bisa.
+  const root = await temp(t); await fs.mkdir(path.join(root, 'lib/subbot/templates/plugins'), { recursive: true }); await fs.writeFile(path.join(root, 'lib/subbot/templates/plugins/ping.js'), 'export default async () => {}'); const db = await new Database({ dir: path.join(root, 'databases') }).load(), conn = fakeConn({ db }); conn.identity.learn({ lid: LID, jid: PN }); db.ensure('settings', BOTLID).jadibot = true
+  global.prefix = '.'; global.timezone = 'Asia/Jakarta'; global.countryCode = '62'; global.defaultLimit = 100
+  const spawned = [], sent = [], notifications = []
+  const timers = { setInterval: () => ({ unref() {} }), clearInterval() {}, setTimeout: () => ({ unref() {} }), clearTimeout() {} }
+  function spawn() { const child = new EventEmitter(); Object.assign(child, { connected: true, stdout: new EventEmitter(), stderr: new EventEmitter(), send(m, cb) { sent.push(m); cb?.(); if (m.type === 'stop') setImmediate(() => { child.exitCode = 0; child.connected = false; child.emit('exit', 0) }) }, kill() { child.connected = false; child.exitCode = 1; setImmediate(() => child.emit('exit', 1)) } }); spawned.push(child); return { child, permission: true, allowCustomPlugins: false } }
+  const manager = new SubBotManager({ root, db, getConn: () => conn, config: { ...config(), maxBots: 5 }, timers, spawn, notify: async (r, text) => notifications.push(text) })
+  global.subBotManager = manager
+  t.after(async () => { delete global.subBotManager; await manager.stopAll(); await conn.store.close() })
+  const replies = []
+  const cmd = (command, sender, isOwner, args) => jadibotCommand({ sender, name: 'X', reply: async teks => { replies.push(String(teks)) } }, { conn, command, text: '', args, isOwner })
+  async function openSession(number, lid) {
+    const id = await manager.create(number, { lid, jid: number + '@s.whatsapp.net', name: 'User' })
+    spawned.at(-1).emit('message', { v: 1, type: 'ready', pid: 42 }); for (let i = 0; i < 10; i++) await tick(); await manager.workers.get(id).handling.run('ipc', async () => {})
+    spawned.at(-1).emit('message', { v: 1, type: 'status', state: 'open', me: { id: number + '@s.whatsapp.net', lid } }); await manager.workers.get(id).handling.run('ipc', async () => {})
+    assert.equal(manager.registry.get(id).status, 'active'); return id
+  }
+  // (a) pemilik sesi tetap bisa stop sendiri.
+  let id = await openSession('6281234567890', LID); await cmd('stopjadibot', LID, false, ['6281234567890']); assert.equal(manager.registry.get(id).status, 'stopped')
+  // (b) owner bot utama bisa stop sesi orang lain (GAGAL tanpa perbaikan).
+  id = await openSession('6282123456789', '10002@lid'); await cmd('stopjadibot', '999@lid', true, ['6282123456789']); assert.equal(manager.registry.get(id).status, 'stopped')
+  // (c) mods/bukan pemilik tetap ditolak, sesi tetap jalan.
+  id = await openSession('6282212345678', '10003@lid'); await assert.rejects(cmd('stopjadibot', '999@lid', false, ['6282212345678']), e => e === 'Sesi bukan milik lo atau tidak ditemukan.'); assert.equal(manager.registry.get(id).status, 'active')
+  // (d) owner bisa hapus sesi orang lain (sudah bisa sebelumnya — guard).
+  id = await openSession('6282312345678', '10004@lid'); await cmd('stopjadibot', '10004@lid', false, ['6282312345678']); await cmd('deljadibot', '999@lid', true, ['6282312345678', 'konfirmasi']); assert.equal(manager.registry.get(id), undefined)
+  // (e) mods tidak bisa hapus sesi orang lain.
+  id = await openSession('6282412345678', '10005@lid'); await cmd('stopjadibot', '10005@lid', false, ['6282412345678']); await assert.rejects(cmd('deljadibot', '999@lid', false, ['6282412345678', 'konfirmasi']), e => e === 'Sesi bukan milik lo atau tidak ditemukan.'); assert.notEqual(manager.registry.get(id), undefined)
+  // Bersihkan sesi yang masih aktif (kasus c) sebelum t.after menghapus
+  // direktori sementara — stopAll di t.after tidak lagi menulis apa pun.
+  const activeId = manager.registry.list().find(r => r.status === 'active')?.id
+  if (activeId) await manager.stop(activeId)
 })
 test('actual worker self-check with Permission Model: imports, isolated env/db, no WhatsApp socket', { timeout: 20000 }, async t => {
   const root = path.resolve('.'), bots = path.join(root, 'bots'); await fs.mkdir(bots, { recursive: true }); const sandbox = await scaffoldSandbox(bots, 'session@6289999999999', path.join(root, 'lib/subbot/templates/plugins')); t.after(() => fs.rm(sandbox, { recursive: true, force: true })); const opts = launcherOptions({ root, sandbox, id: 'session@6289999999999', config: config() }); const { permission, allowCustomPlugins, ...forkOpts } = opts

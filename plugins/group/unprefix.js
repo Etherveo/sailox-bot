@@ -4,8 +4,11 @@
 //   .unprefix list           lihat daftar perintah tanpa prefix
 //   .unprefix del <perintah> hapus dari daftar
 //
-// Daftar disimpan per grup di record chats (chat.unprefix, array kata
-// huruf kecil) — pola yang sama seperti mode swgc (plugins/group/group.js).
+// Daftar disimpan per grup — store-nya bercabang menurut konteks
+// (lib/helpers/unprefixStore.js): bot utama di record chats
+// (chat.unprefix), sub-bot di koleksi 'unprefix' (databases/unprefix.json
+// di dalam sandbox sub-bot itu sendiri). Satu plugin, dua store yang
+// tidak pernah tercampur; entri lama bot utama tidak berubah.
 // Yang boleh mengubah: owner (TANPA harus admin grup — perintah Veo
 // 2026-11-26 22:07) atau admin grup; semuanya harus premium
 // (handler.premium; founder/owner/mods lolos premium otomatis).
@@ -31,6 +34,7 @@
 // berarti TAMBAH kata 'del' (alias .delete). 'list' selalu menampilkan
 // daftar — tidak ada perintah bernama 'list', jadi tidak ambigu.
 import { findUnprefixEntry } from '#lib/helpers/parsing.js'
+import { getUnprefixWords, setUnprefixWords } from '#lib/helpers/unprefixStore.js'
 
 export const UNPREFIX_MAX = 20
 
@@ -53,15 +57,15 @@ export function findUnprefixCommand(word, entries) {
   return findUnprefixEntry(word, entries)?.plugin ?? null
 }
 
-let handler = async (m, { args, isOwner, isAdmin }) => {
+let handler = async (m, { args, isOwner, isAdmin, conn }) => {
   // Gerbang admin di sini (bukan handler.admin): owner lolos tanpa harus
   // admin grup; admin biasa tetap harus admin. Pesan sama persis seperti
   // gerbang pipeline 'admin' (lib/helpers/messages.js) supaya balasan ke
   // non-owner tidak berubah.
   if (!isOwner && !isAdmin) throw 'Perintah ini khusus admin grup.'
   const [sub, rawWord] = args ?? []
-  const rec = globalThis.db.ensure('chats', m.chat)
-  const list = unprefixList(rec)
+  const db = globalThis.db
+  const list = getUnprefixWords(db, m.chat, conn)
   if (!sub) throw USAGE
   const subLower = String(sub).toLowerCase()
   if (subLower === 'list') {
@@ -81,8 +85,7 @@ let handler = async (m, { args, isOwner, isAdmin }) => {
     const target = findUnprefixEntry(word, entries)
     const removed = list.filter(l => l === word || (target && findUnprefixEntry(l, entries)?.id === target.id))
     if (!removed.length) throw `*${word}* tidak ada di daftar tanpa prefix grup ini.`
-    rec.unprefix = list.filter(l => !removed.includes(l))
-    await globalThis.db.save('chats')
+    await setUnprefixWords(db, m.chat, conn, list.filter(l => !removed.includes(l)))
     await m.reply(`✅ *${removed.join(', ')}* dihapus dari daftar tanpa prefix.`)
     return
   }
@@ -97,8 +100,7 @@ let handler = async (m, { args, isOwner, isAdmin }) => {
   if (existing) throw `*${word}* sudah ada di daftar tanpa prefix grup ini sebagai *${existing}* — satu label mencakup seluruh perintah plugin itu, termasuk aliasnya.`
   if (list.length >= UNPREFIX_MAX) throw `Daftar tanpa prefix grup ini sudah penuh (maks ${UNPREFIX_MAX} perintah).\nHapus dulu dengan: .unprefix del <perintah>`
   list.push(word)
-  rec.unprefix = list
-  await globalThis.db.save('chats')
+  await setUnprefixWords(db, m.chat, conn, list)
   await m.reply(`✅ *${word}* sekarang bisa dipakai tanpa prefix di grup ini.\nSemua nama perintah plugin itu (termasuk aliasnya) ikut bisa dipakai tanpa prefix.\nKetik *${word}* (tanpa .) untuk memakainya — kata harus berdiri sendiri, bukan menempel pada kata lain.`)
 }
 handler.help = ['unprefix <perintah>', 'unprefix list', 'unprefix del <perintah>']
@@ -106,8 +108,13 @@ handler.tags = ['group']
 handler.command = /^unprefix$/i
 handler.group = true
 handler.premium = true
+// Dibagikan ke sub-bot (handler.sharing): plugin ikut tercopy ke sandbox
+// saat scaffold + hash-nya dipercaya policy worker. Store daftarnya
+// tetap terpisah lewat lib/helpers/unprefixStore.js — sub-bot memakai
+// databases/unprefix.json di sandbox-nya sendiri, bukan chats bot utama.
 // TANPA handler.admin — gerbang admin ada di dalam handler (lihat atas)
 // supaya owner tidak perlu jadi admin grup (perintah Veo 2026-11-26).
 // TANPA handler.limit — fitur grup bebas limit (keputusan Veo 2026-11-25;
 // lihat tests/pluginLimits.test.js).
+handler.sharing = true
 export default handler

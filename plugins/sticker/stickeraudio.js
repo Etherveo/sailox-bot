@@ -28,15 +28,19 @@
 // kebutuhan yang terbukti):
 //   - impor Baileys dari @whiskeysockets/baileys, bukan @adiwajshing.
 //   - stiker foto dibuat lib/media/sticker.js (mediaToSticker — ffmpeg +
-//     EXIF lokal, sama seperti .s); stiker video dibuat ffmpeg langsung di
-//     plugin ini (tangga fps/qv ala Yue) + addExifToWebp dari helper yang
-//     sama. Media diambil resolveMediaTarget/downloadMediaWithFallback
-//     (termasuk fallback store untuk once-view), bukan mesin download
-//     buatan Yue — resolver Sailox sudah menangani audioMessage.
+//     EXIF lokal, sama seperti .s); stiker video (makeVideoSticker) dan
+//     konversi audio (toOggOpus) juga tinggal di lib/media/sticker.js
+//     (pindah dari plugin ini 2026-11-27 supaya dipakai juga layanan
+//     konversi sub-bot di proses utama). Media diambil
+//     resolveMediaTarget/downloadMediaWithFallback (termasuk fallback
+//     store untuk once-view), bukan mesin download buatan Yue — resolver
+//     Sailox sudah menangani audioMessage.
 //   - sesi foto->audio di atas store sesi generik Sailox
 //     (lib/helpers/sessionStore.js, TTL 60 dtk), bukan Map global.
 //   - ffmpeg dipanggil via execFile + array argumen (AGENTS.md §4.7/§6),
-//     bukan shell string seperti di plugin Yue.
+//     bukan shell string seperti di plugin Yue; di sub-bot, konversi
+//     dilempar ke bot utama lewat channel IPC (lib/subbot/convertClient.js)
+//     karena worker tidak boleh spawn proses.
 //   - string yang dilempar = pesan ke pengirim (konvensi pipeline);
 //     Error = kegagalan internal (laporan ke founder).
 //   - EXIF stiker membawa emoji 🔊 seperti plugin Yue (opsi `emojis` di
@@ -56,18 +60,14 @@
 //     jadi tetap butuh sesi supaya pengguna bisa menempelkan VN.
 // Gagal relay -> fallback kirim stiker + audio terpisah (ala Yue).
 // Tes live masih wajib: kirim .sa di HP dan lihat ikon mute muncul.
-import fs from 'node:fs/promises'
 import path from 'node:path'
 import crypto from 'node:crypto'
-import { execFile } from 'node:child_process'
-import { promisify } from 'node:util'
 import { proto, prepareWAMessageMedia } from '@whiskeysockets/baileys'
 import { reactTo, REACT } from '#lib/helpers/react.js'
 import { createSessionStore } from '#lib/helpers/sessionStore.js'
-import { parseStickerArgs, mediaToSticker, addExifToWebp, probeDurationSeconds, ffmpegAvailable, STICKER_SIZE } from '#lib/media/sticker.js'
+import { parseStickerArgs, mediaToSticker, ffmpegAvailable, toOggOpus, makeVideoSticker } from '#lib/media/sticker.js'
 import { resolveMediaTarget, stickerKindFor, downloadMediaWithFallback, MediaGoneError } from '#lib/media/resolve.js'
-
-const execFileP = promisify(execFile)
+import { requestConvert, stampStickerMeta } from '#lib/subbot/convertClient.js'
 export const MAX_DURATION = 25
 export const SESSION_MS = 60000
 // Emoji yang ditulis ke EXIF stiker (ikon 🔊 = penanda sound sticker).
@@ -128,51 +128,6 @@ export function patchProto() {
   }
 
   M.__audioStickerPatched = true
-}
-
-const cleanup = (...files) => Promise.all(files.map(f => fs.rm(f, { force: true }).catch(() => {})))
-
-// Audio apa pun -> OGG Opus mono 48kHz (format VN WA), dipotong 25 dtk.
-async function toOggOpus(buffer, { root }) {
-  const dir = path.join(root, 'tmp')
-  await fs.mkdir(dir, { recursive: true })
-  const stamp = `${Date.now()}-${crypto.randomBytes(4).toString('hex')}`
-  const input = path.join(dir, `sa-in-${stamp}`)
-  const output = path.join(dir, `sa-out-${stamp}.ogg`)
-  try {
-    await fs.writeFile(input, buffer)
-    const seconds = await probeDurationSeconds(input).catch(() => null)
-    await execFileP('ffmpeg', ['-y', '-i', input, '-vn', '-map', '0:a:0', '-t', String(MAX_DURATION), '-af', 'aresample=48000:async=1:first_pts=0', '-c:a', 'libopus', '-b:a', '48k', '-vbr', 'on', '-compression_level', '10', '-ac', '1', '-ar', '48000', '-application', 'audio', '-f', 'ogg', output], { timeout: 60000, maxBuffer: 4 * 1024 * 1024 })
-    const ogg = await fs.readFile(output)
-    if (!ogg || ogg.length < 200) throw new Error('Jalur audio kosong atau terlalu pendek.')
-    return { ogg, seconds: seconds ?? 0 }
-  } finally {
-    await cleanup(input, output)
-  }
-}
-
-// Video (maks 25 dtk) -> stiker WebP animasi 512x512. Tangga fps/kualitas
-// ala Yue supaya hasilnya muat di bawah 880 KB; EXIF ditulis helper
-// Sailox (addExifToWebp) supaya watermark pack/author konsisten dengan .s.
-async function makeVideoSticker(buffer, packname, author, { root }) {
-  const dir = path.join(root, 'tmp')
-  await fs.mkdir(dir, { recursive: true })
-  const stamp = `${Date.now()}-${crypto.randomBytes(4).toString('hex')}`
-  const input = path.join(dir, `sa-vid-in-${stamp}.mp4`)
-  const output = path.join(dir, `sa-vid-out-${stamp}.webp`)
-  try {
-    await fs.writeFile(input, buffer)
-    let webp = null
-    for (const [fps, qv] of [[10, 50], [8, 36], [6, 24], [5, 16], [4, 12], [3, 8]]) {
-      // '-fps_mode passthrough' = '-vsync 0' versi baru (dihapus ffmpeg 9).
-      await execFileP('ffmpeg', ['-y', '-i', input, '-t', String(MAX_DURATION), '-vf', `fps=${fps},scale=${STICKER_SIZE}:${STICKER_SIZE}:force_original_aspect_ratio=decrease,format=rgba,pad=${STICKER_SIZE}:${STICKER_SIZE}:(ow-iw)/2:(oh-ih)/2:color=0x00000000,setsar=1`, '-vcodec', 'libwebp', '-lossless', '0', '-compression_level', '6', '-q:v', String(qv), '-loop', '0', '-preset', 'picture', '-an', '-fps_mode', 'passthrough', output], { timeout: 90000, maxBuffer: 4 * 1024 * 1024 })
-      webp = await fs.readFile(output)
-      if (webp.length <= 880 * 1024) break
-    }
-    return addExifToWebp(webp, { packname, author, packId: `sailox-sa-${crypto.randomBytes(8).toString('hex')}`, emojis: STICKER_EMOJIS })
-  } finally {
-    await cleanup(input, output)
-  }
 }
 
 function makeWaveform(seed, length = 64) {
@@ -250,8 +205,14 @@ let handler = async (m, { conn, text, __dirname }) => {
     return conn.sendMessage(chat, { text: 'Sesi Audio Sticker berhasil dibatalkan.' }, { quoted: m })
   }
 
-  if (!await ffmpegAvailable()) throw 'ffmpeg tidak tersedia di server — .sa sedang nonaktif.'
-  const wm = parseStickerArgs(argText, { packname: global.namebot || 'Sailox', author: 'Velaryna' })
+  // Sub-bot: konversi ffmpeg dilempar ke bot utama lewat channel IPC
+  // (lib/subbot/convertClient.js) — worker tidak bisa spawn proses.
+  // pack/author ditempel (pure-JS) HANYA bila user memberikannya.
+  const isSub = conn.role === 'sub'
+  if (!isSub && !await ffmpegAvailable()) throw 'ffmpeg tidak tersedia di server — .sa sedang nonaktif.'
+  const userWm = parseStickerArgs(argText, {})
+  const wm = { packname: userWm.packname || global.namebot || 'Sailox', author: userWm.author || 'Velaryna' }
+  const stampIfGiven = sticker => (userWm.packname || userWm.author) ? stampStickerMeta(sticker, { packname: wm.packname, author: wm.author, emojis: STICKER_EMOJIS }) : sticker
   const target = resolveMediaTarget(m)
   if (!target) throw USAGE
 
@@ -274,7 +235,13 @@ let handler = async (m, { conn, text, __dirname }) => {
   // 1) Foto/dokumen gambar/stiker -> simpan sesi, tunggu VN/audio.
   if (kind === 'image') {
     await reactTo(m, '🎨').catch(() => {})
-    const sticker = await mediaToSticker(buffer, { kind: 'image', root, ...wm, emojis: STICKER_EMOJIS })
+    let sticker
+    if (isSub) {
+      const converted = await requestConvert({ job: 'sticker-image', purpose: 'sound-sticker', kind: 'image', buffer, seconds: 0 })
+      sticker = stampIfGiven(converted.buffer)
+    } else {
+      sticker = await mediaToSticker(buffer, { kind: 'image', root, ...wm, emojis: STICKER_EMOJIS })
+    }
     audioStickerSessions.put(chat, sender, { sticker, animated: false })
     await reactTo(m, REACT.done).catch(() => {})
     m.limit = 0 // Langkah ini hanya membuat sesi — limit baru dipotong saat VN/video terkirim.
@@ -286,9 +253,22 @@ let handler = async (m, { conn, text, __dirname }) => {
     const seconds = toNum(target.msg?.msg?.seconds)
     if (seconds > MAX_DURATION) throw `Durasi video maksimal ${MAX_DURATION} detik.`
     await reactTo(m, '🎬').catch(() => {})
-    const sticker = await makeVideoSticker(buffer, wm.packname, wm.author, { root })
+    let sticker
+    if (isSub) {
+      const converted = await requestConvert({ job: 'sa-video-sticker', purpose: 'sound-sticker', kind: 'video', buffer, seconds })
+      sticker = stampIfGiven(converted.buffer)
+    } else {
+      sticker = await makeVideoSticker(buffer, wm.packname, wm.author, { root })
+    }
     let converted = null
-    try { converted = await toOggOpus(buffer, { root }) } catch {}
+    try {
+      if (isSub) {
+        const r = await requestConvert({ job: 'sa-audio', purpose: 'sound-sticker', kind: 'video', buffer, seconds })
+        converted = { ogg: r.buffer, seconds: r.seconds }
+      } else {
+        converted = await toOggOpus(buffer, { root })
+      }
+    } catch {}
     if (!converted) {
       await reactTo(m, REACT.done).catch(() => {})
       return conn.sendMessage(chat, { sticker }, { quoted: m })
@@ -305,7 +285,12 @@ let handler = async (m, { conn, text, __dirname }) => {
     await reactTo(m, '🎵').catch(() => {})
     let converted
     try {
-      converted = await toOggOpus(buffer, { root })
+      if (isSub) {
+        const r = await requestConvert({ job: 'sa-audio', purpose: 'sound-sticker', kind: 'audio', buffer, seconds: toNum(target.msg?.msg?.seconds) })
+        converted = { ogg: r.buffer, seconds: r.seconds }
+      } else {
+        converted = await toOggOpus(buffer, { root })
+      }
     } catch {
       await reactTo(m, REACT.error).catch(() => {})
       throw NO_AUDIO
@@ -322,4 +307,7 @@ handler.help = ['sa (sound sticker: reply foto lalu VN/audio, atau reply video)'
 handler.tags = ['sticker']
 handler.command = /^s(?:ti(?:c)?ker)?a(?:udio)?$/i
 handler.limit = true
+// Dibagikan ke sub-bot: konversi jalan lewat channel bot utama
+// (lib/subbot/convertClient.js) — worker tetap tanpa child process.
+handler.sharing = true
 export default handler

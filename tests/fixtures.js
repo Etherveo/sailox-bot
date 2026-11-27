@@ -9,12 +9,12 @@ export function raw(text = '.ping', { group = false, fromMe = false, id = 'msg1'
   if (alt) m.key[group ? 'participantAlt' : 'remoteJidAlt'] = LID
   return m
 }
-export function fakeConn({ db, roles, store = createStore({ wait: async () => {} }), mapping = true } = {}) {
+export function fakeConn({ db, roles, store = createStore({ wait: async () => {} }), mapping = true, role = 'main' } = {}) {
   serialize(); const calls = []
   const sock = { ev: new EventEmitter(), user: { id: BOTPN, lid: BOTLID }, calls, signalRepository: { lidMapping: { getLIDForPN: async pn => mapping && pn === PN ? LID : null, getPNForLID: async lid => mapping && lid === LID ? PN : null } },
     async sendMessage(jid, data, options) { calls.push({ jid, data, options }); return raw('', { id: 'sent' + calls.length, fromMe: true, message: { conversation: data.text || '' } }) },
     async groupMetadata(id) { calls.push({ metadata: id }); return { id, subject: 'Test group', participants: [{ id: LID, phoneNumber: PN, admin: 'admin' }, { id: BOTLID, phoneNumber: BOTPN, admin: 'admin' }] } },
     async groupParticipantsUpdate(jid, ids, action) { calls.push({ action, ids }); return ids.map(jid => ({ jid, status: '200' })) }, async readMessages(keys) { calls.push({ read: keys }) }, async updateMediaMessage(m) { return m },
   }
-  decorateSocket(sock, { db, store, outbound: new OutboundQueue({ perChatMs: 0, perSecond: 10000, jitter: 0 }) }); store.bind(sock); return sock
+  decorateSocket(sock, { db, store, role, outbound: new OutboundQueue({ perChatMs: 0, perSecond: 10000, jitter: 0 }) }); store.bind(sock); return sock
 }
