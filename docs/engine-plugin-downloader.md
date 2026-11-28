@@ -84,6 +84,8 @@ plugin permukaan (lapisan 3):
 | `.download` / `.dl` | Publik | **Ya** — file JSON `src/download-queue.json`, maks 2 berjalan, 1 per pengguna aktif, 3 menunggu per pengguna | Dihapus setelah berhasil terkirim ke WA; dipertahankan (dijaporkan jalurnya) bila gagal/terlalu besar |
 | `.animedownload` / `.adl` | Founder, khusus anime, format `url \| nama custom \| isUpload 1/0` | **Ya** — antrean `.dl` yang sama, job bertanda `options` khusus (lihat bagian `.animedownload` di bawah) | Dihapus setelah terkirim; bila `isUpload=1` dipertahankan sampai upload Drive selesai (sukses/duplikat) — gagal upload = file tidak pernah dihapus |
 | `.tiktok` / `.tt` | Publik, interaktif (lihat bawah) | **Ya, klaim manual** — memakai file antrean yang sama, tapi tidak diproses pump `.dl` | Sementara di `src/downloads/tiktok/tt-*`, dihapus setelah terkirim (unduh dulu, baru kirim — lihat bawah) |
+| `.instagram` / `.ig` | Publik, solo (port yue 2026-11-27, pola `.tt`) | **Ya, klaim manual** — seperti `.tt` | Sementara di `src/downloads/instagram/ig-*`, dihapus setelah terkirim; carousel dikirim berurutan (bukan album) |
+| `.facebook` / `.fb` | Publik, solo + tawaran HD (port yue 2026-11-27, pola `.tt`) | **Ya, klaim manual** — seperti `.tt` | Sementara di `src/downloads/facebook/fb-*`, dihapus setelah terkirim; kirim `hd` (teks biasa, 60 detik) untuk kualitas HD bila ada |
 
 Aturan antrean `.dl`:
 
@@ -351,11 +353,21 @@ Catatan resolver per platform:
   dipilih 720p pertama lalu baris pertama. Sempat dicoba API ponta
   yue (`my.ponta.dpdns.org`) tapi API itu kini mewajibkan API key
   berbayar (401) dan plugin yue sendiri tak membawanya — dibuang di
-  hari yang sama.
+  hari yang sama. KOREKSI 2026-11-27: file plugin yue kini MEMBAWA key
+  (`sk-pontalabs-…`) dan API-nya menjawab 200 saat dicek — tapi key itu
+  TIDAK dicomot ke Sailox: itu API key berbayar, pemakaian sebagai
+  fallback FB butuh keputusan pemilik dulu. Sementara itu `getInfo`
+  juga mengembalikan `quality` + `alternates` (baris kualitas lain)
+  untuk tawaran HD permukaan `.fb`.
 - instagram memakai resolver bersama `lib/downloader/instatiktok.js`
   (layanan instatiktok.com, dari legacy `downloader-download.js`):
   semua tautan hasil resolver adalah file satu postingan (multi-file
-  -> list bermediaItems).
+  -> list bermediaItems). Sejak 2026-11-27 rantai resolvernya
+  instatiktok -> downloadgram (port plugin IG yue,
+  `lib/downloader/downloadgram.js`): downloadgram hanya dicoba bila
+  instatiktok gagal — instatiktok sempat gagal untuk satu reel founder
+  (laporan guardian 27 Nov 18.21), sementara downloadgram terverifikasi
+  live menjawab 200 dengan 3 tautan untuk reel yang sama.
 - pinterest memakai scrape langsung halaman pin (port pindl); twitter memakai vxtwitter dengan API
   legacy sebagai cadangan.
 
@@ -379,3 +391,10 @@ Pelanggaran klasik yang harus ditolak saat review/save:
   streaming `streamToFile`).
 - Menyimpan state antrean/antrian job hanya di variabel proses (harusnya
   persisten di disk).
+
+Pengecualian atas butir pertama (perintah pemilik 2026-11-27):
+permukaan solo `.tt`, `.ig`, dan `.fb` BOLEH ada sebagai plugin perintah
+per platform — dengan syarat mengikuti pola `.tt`: plugin hanya gerbang
+awal + interaksi, TIDAK membawa resolver sendiri (resolver tetap milik
+engine yang sama dengan `.dl`), dan memakai klaim manual antrean `.dl`
+yang sama. Yang dilarang tetap resolver duplikat di dalam plugin.

@@ -35,6 +35,7 @@ const FREE_LIMIT_PLUGINS = new Set([
   'group/group.js',
   'group/kick.js',
   'group/linkgc.js',
+  'group/polling.js',
   'group/promote.js',
   'group/setdesc.js',
   'group/setnamagrup.js',

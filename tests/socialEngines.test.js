@@ -5,6 +5,7 @@ import { createEngineRegistry } from '../lib/downloader/registry.js'
 import { createEngineGuardian, engineGuardian, ownerJid } from '../lib/downloader/guardian.js'
 import { runDownloadJob } from '../lib/downloader/runJob.js'
 import { parseInstaTiktokLinks } from '../lib/downloader/instatiktok.js'
+import { parseDownloadgramLinks, resolveDownloadgram } from '../lib/downloader/downloadgram.js'
 import * as tiktok from '../lib/downloader/engines/tiktok.js'
 import * as facebook from '../lib/downloader/engines/facebook.js'
 import * as instagram from '../lib/downloader/engines/instagram.js'
@@ -103,6 +104,11 @@ test('facebook: port scraper yue (fbdownloader.to) — baris 720p dipilih, baris
   assert.equal(info.downloadUrl, 'https://cdn/720.mp4')
   assert.equal(info.fileName, 'facebook-123456.mp4')
   assert.equal(info.size, 555, 'ukuran dari HEAD CDN')
+  // 2026-11-27 (.fb solo): kualitas terpilih + baris lain dibawa untuk
+  // tawaran HD — aditif, .dl mengabaikannya.
+  assert.equal(info.quality, '720p (HD)')
+  assert.deepEqual(info.alternates.map(a => a.quality), ['360p', 'Audio'])
+  assert.equal(info.alternates[0].downloadUrl, 'https://cdn/360.mp4')
 
   const noHd = `<table class="table"><tbody>
   <tr><td class="video-quality">360p</td><td><a class="download-link-fb" href="https://cdn/360.mp4">unduh</a></td></tr>
@@ -140,6 +146,74 @@ test('instagram: semua tautan jadi list, #item memilih satu', async () => {
   const single = await instagram.getInfo('https://www.instagram.com/reel/XYZ/', { fetchFn: instaFetch('<a class="btn" href="https://cdn/satu.mp4">1</a>') })
   assert.equal(single.downloadUrl, 'https://cdn/satu.mp4')
   assert.equal(instagram.match('https://www.instagram.com/reel/XYZ/'), true)
+})
+
+// ─── Downloadgram (port yue) — fallback Instagram ───────────────────────────
+// Token cdn.downloadgram.org/?token=<JWT>: payload segmen ke-2 membawa
+// `force` + url/filename asli; hanya yang ber-force dipakai, dideduplikasi
+// dari url/filename itu (bukan dari tokennya — token tiap request beda).
+
+function dgToken(payload) {
+  const b64 = Buffer.from(JSON.stringify(payload)).toString('base64url')
+  return `https://cdn.downloadgram.org/?token=aaa.${b64}.bbb`
+}
+
+test('downloadgram: hanya tautan ber-force yang dipakai, dideduplikasi dari payload JWT', () => {
+  const html = `<a href="${dgToken({ force: true, url: 'https://cdn/x.mp4' })}">1</a>`
+    + `<a href="${dgToken({ force: true, url: 'https://cdn/x.mp4' })}">duplikat, token sama</a>`
+    + `<a href="${dgToken({ force: false, url: 'https://cdn/y.mp4' })}">tanpa force</a>`
+    + `<a href="${dgToken({ force: true, filename: 'z.jpg' })}">pakai filename</a>`
+    + `<a href="https://cdn.downloadgram.org/?token=bukan-jwt">token rusak</a>`
+  assert.deepEqual(parseDownloadgramLinks(html), [
+    dgToken({ force: true, url: 'https://cdn/x.mp4' }),
+    dgToken({ force: true, filename: 'z.jpg' }),
+  ])
+})
+
+test('downloadgram: resolveDownloadgram POST form yue, tanpa tautan -> error', async () => {
+  let seen = null
+  const fetchFn = async (url, opts = {}) => {
+    seen = { url: String(url), method: opts.method, body: String(opts.body), ct: opts.headers['content-type'] }
+    return new Response(`<a href="${dgToken({ force: true, url: 'https://cdn/a.mp4' })}">1</a>`)
+  }
+  const links = await resolveDownloadgram('https://www.instagram.com/reel/XYZ/', { fetchFn })
+  assert.equal(links.length, 1)
+  assert.equal(seen.url, 'https://api.downloadgram.org/media')
+  assert.equal(seen.method, 'POST')
+  assert.match(seen.body, /url=https%3A%2F%2Fwww.instagram.com%2Freel%2FXYZ%2F/)
+  assert.match(seen.body, /v=3/)
+  assert.match(seen.ct, /application\/x-www-form-urlencoded/)
+  await assert.rejects(() => resolveDownloadgram('https://www.instagram.com/reel/XYZ/', { fetchFn: async () => new Response('kosong') }), /Tidak ada media/)
+  await assert.rejects(() => resolveDownloadgram('https://www.instagram.com/reel/XYZ/', { fetchFn: async () => new Response('x', { status: 500 }) }), /status 500/)
+})
+
+test('instagram: fallback downloadgram bila instatiktok gagal; gagal total bila keduanya mati', async () => {
+  const dgHtml = `<a href="${dgToken({ force: true, url: 'https://cdn/a.mp4' })}">1</a><a href="${dgToken({ force: true, url: 'https://cdn/b.mp4' })}">2</a>`
+  const fetchFn = async url => {
+    if (String(url).includes('instatiktok.com/api')) return Response.json({ status: 'failed', html: '' })
+    if (String(url).includes('api.downloadgram.org/media')) return new Response(dgHtml)
+    throw new Error('URL tak dikenal di stub: ' + url)
+  }
+  const list = await instagram.getInfo('https://www.instagram.com/reel/XYZ/', { fetchFn })
+  assert.equal(list.isList, true)
+  assert.equal(list.mediaItems.length, 2)
+  assert.ok(list.mediaItems[1].downloadUrl.startsWith('https://cdn.downloadgram.org/?token='), 'downloadUrl-nya tautan CDN downloadgram itu sendiri (yang di-fetch engine.download)')
+  const deadFetch = async url => {
+    if (String(url).includes('instatiktok.com/api')) return Response.json({ status: 'failed', html: '' })
+    if (String(url).includes('api.downloadgram.org/media')) return new Response('', { status: 500 })
+    throw new Error('URL tak dikenal di stub')
+  }
+  await assert.rejects(() => instagram.getInfo('https://www.instagram.com/reel/XYZ/', { fetchFn: deadFetch }), /kedua resolver/)
+  // Instatiktok sukses -> downloadgram TIDAK dipanggil.
+  const calls = []
+  const okFetch = async url => {
+    calls.push(String(url))
+    if (String(url).includes('instatiktok.com/api')) return Response.json({ status: 'success', html: '<a class="btn" href="https://cdn/satu.mp4">1</a>' })
+    throw new Error('downloadgram tidak boleh dipanggil bila instatiktok sukses')
+  }
+  const single = await instagram.getInfo('https://www.instagram.com/reel/XYZ/', { fetchFn: okFetch })
+  assert.equal(single.downloadUrl, 'https://cdn/satu.mp4')
+  assert.ok(!calls.some(u => u.includes('downloadgram')))
 })
 
 // ─── Pinterest ───────────────────────────────────────────────────────────────
