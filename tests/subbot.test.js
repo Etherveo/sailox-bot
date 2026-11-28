@@ -22,6 +22,21 @@ function config() { return { enabled: true, maxBots: 2, maxPerUser: 1, pairingTi
 test('sandbox rejects traversal, symlink and invalid delete; scaffold preserves existing files', async t => { const root = await temp(t); await assert.rejects(sandboxPath(root, '../config.js')); await assert.rejects(sandboxPath(root, '/etc/passwd')); await fs.symlink(os.tmpdir(), path.join(root, 'link')); await assert.rejects(sandboxPath(root, 'link/test'), /Symlink/); await assert.rejects(deleteSandbox(root, '..')); const sandbox = await scaffoldSandbox(root, 'session@6281234567890'); assert.equal(await sandboxPath(root, 'session@6281234567890/auth'), path.join(sandbox, 'auth')); await deleteSandbox(root, 'session@6281234567890'); await assert.rejects(fs.access(sandbox)) })
 test('IPC validates direction/type/size and start fields', () => { assert.equal(validIPC({ v: 1, type: 'ready', pid: 1 }, 'from-worker'), true); assert.equal(validIPC({ v: 1, type: 'ready', pid: -1 }, 'from-worker'), false); assert.equal(validIPC({ v: 1, type: 'stop', reason: 'test' }, 'to-worker'), true); assert.equal(validIPC({ v: 1, type: 'pairing-code', code: 'ABCDEFGH' }, 'from-worker'), true); assert.equal(validIPC({ v: 1, type: 'log', level: 'info', line: 'x'.repeat(70000) }, 'from-worker'), false); assert.equal(validIPC({ v: 1, type: 'unknown' }, 'from-worker'), false); assert.equal(validIPC({ v: 1, type: 'start', sandbox: '/' }, 'to-worker'), false) })
 test('launcher has minimal environment, write confinement, permission fallbacks and no inherited execArgv', () => { const o = launcherOptions({ root: '/app', sandbox: '/app/bots/session@6281234567890', id: 'session@6281234567890', config: config() }); assert.equal(o.env.PATH, undefined); assert.equal(o.env.HOME, undefined); assert.equal(o.env.NODE_OPTIONS, undefined); assert.ok(o.execArgv.includes('--permission')); assert.ok(!o.execArgv.some(x => x.includes('--allow-child-process'))); assert.ok(!o.execArgv.includes('--allow-fs-read=/app')); const fallback = launcherOptions({ root: '/app', sandbox: '/app/bots/session@6281234567890', id: 'session@6281234567890', config: { ...config(), allowCustomPlugins: true }, flags: new Set() }); assert.equal(fallback.permission, false); assert.equal(fallback.allowCustomPlugins, false) })
+test('launcher meneruskan BOT_PROXY ke worker bila di-set, dan tidak bila kosong', () => {
+  const prev = process.env.BOT_PROXY
+  try {
+    process.env.BOT_PROXY = 'http://proxy:3128'
+    const o = launcherOptions({ root: '/app', sandbox: '/app/bots/session@6281234567890', id: 'session@6281234567890', config: config() })
+    assert.equal(o.env.BOT_PROXY, 'http://proxy:3128')
+    assert.equal(o.env.PATH, undefined) // env tetap minimal
+    delete process.env.BOT_PROXY
+    const o2 = launcherOptions({ root: '/app', sandbox: '/app/bots/session@6281234567890', id: 'session@6281234567890', config: config() })
+    assert.equal(o2.env.BOT_PROXY, undefined)
+  } finally {
+    if (prev === undefined) delete process.env.BOT_PROXY
+    else process.env.BOT_PROXY = prev
+  }
+})
 test('sub-bot listplugin template lists sandbox plugins; main listplugin still refuses sub', async t => {
   const root = await temp(t)
   await fs.mkdir(path.join(root, 'main'), { recursive: true }); await fs.mkdir(path.join(root, 'tools'), { recursive: true })
